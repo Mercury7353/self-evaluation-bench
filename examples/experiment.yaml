@@ -1,0 +1,63 @@
+version: 1
+name: researcher-evaluation
+runtime:
+  rootfs: ${SEB_ROOTFS}
+  science_packages: ${SEB_SCIENCE_PACKAGES}
+providers:
+  inference:
+    # Gateway appends /anthropic/v1/messages; this must be the provider root URL.
+    upstream: https://YOUR_ANTHROPIC_COMPATIBLE_PROVIDER
+    key_env: SEB_PROVIDER_API_KEY
+researchers:
+  - id: researcher-a
+    harness: claude_code
+    provider: inference
+    model: REPLACE_RESEARCHER_MODEL
+    # Replace ALL prices with verified USD per million tokens; these are placeholders.
+    price: {input: 1.0, output: 1.0, cache_write_multiplier: 1.0}
+    # effort: high
+    # prompt_file: /absolute/path/to/your-task-instructions.md
+models:
+  - {id: dev-a, family: family-a, split: development, provider: inference, model: REPLACE_MODEL_A, price: {input: 1.0, output: 1.0}}
+  - {id: dev-b, family: family-b, split: development, provider: inference, model: REPLACE_MODEL_B, price: {input: 1.0, output: 1.0}}
+  - {id: dev-c, family: family-c, split: development, provider: inference, model: REPLACE_MODEL_C, price: {input: 1.0, output: 1.0}}
+  - {id: holdout-a, family: family-d, split: holdout, provider: inference, model: REPLACE_MODEL_D, price: {input: 1.0, output: 1.0}}
+  - {id: holdout-b, family: family-e, split: holdout, provider: inference, model: REPLACE_MODEL_E, price: {input: 1.0, output: 1.0}}
+  - {id: holdout-c, family: family-f, split: holdout, provider: inference, model: REPLACE_MODEL_F, price: {input: 1.0, output: 1.0}}
+benchmarks:
+  whitebox:
+    - id: visible-target
+      reference: references/visible.example.json
+      scale: 1
+      resources: [] # Paths to operator-supplied task data/code, copied into the researcher workspace.
+  blackbox:
+    - id: hidden-target
+      reference: references/hidden.example.json
+      scale: 1
+# All budgets are independent PER selected researcher run; not shared across parallel invocations.
+budgets:
+  researcher_usd: 50
+  development_usd: 30
+  evaluation_usd: 20
+  suite_usd: 5
+  item_usd: 1
+# These are settings, not a recommendation for adequate experimental sample size.
+design:
+  rounds: 2
+  seconds: 3600
+  minimum_items: 100
+evaluation:
+  seconds: 7200
+  model_concurrency: 3
+  requests_per_model: 2
+  policy:
+    min_output_tokens: 32768
+    default_output_tokens: 32768
+    max_output_tokens: 131072
+    infra_retries: 3
+    attempt_timeout_seconds: 900
+overall:
+  metric: macro_spearman
+  source: family_cv # Or raw_mean for correlations without a learned target mapping.
+  minimum_models: 3
+  constant_prediction: zero

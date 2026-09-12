@@ -1,0 +1,1 @@
+{"protocol_version":1,"items":[{"id":"sum"},{"id":"product"}],"aggregation":{"kind":"weighted_mean"},"selection":"fixed"}

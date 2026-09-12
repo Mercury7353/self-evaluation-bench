@@ -1,0 +1,78 @@
+"""Durable, atomic USD reservations. Unknown/aborted charges stay reserved."""
+import json
+import math
+import sqlite3
+import time
+from pathlib import Path
+
+class BudgetExceeded(Exception):
+    pass
+
+class Ledger:
+    def __init__(self, path):
+        self.path = str(path)
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with self.connect() as db:
+            db.executescript('''
+            CREATE TABLE IF NOT EXISTS wallets(name TEXT PRIMARY KEY, cap REAL);
+            CREATE TABLE IF NOT EXISTS calls(id TEXT PRIMARY KEY, wallet TEXT,
+              model TEXT, reserve REAL, charged REAL, state TEXT, usage TEXT,
+              created REAL, finished REAL);
+            CREATE TABLE IF NOT EXISTS budget_scopes(id TEXT PRIMARY KEY, wallet TEXT, cap REAL);
+            CREATE TABLE IF NOT EXISTS call_budget_scopes(call_id TEXT, scope TEXT,
+              PRIMARY KEY(call_id, scope));
+            ''')
+
+    def connect(self):
+        db = sqlite3.connect(self.path, timeout=60)
+        db.row_factory = sqlite3.Row
+        return db
+
+    def wallet(self, name, cap):
+        with self.connect() as db:
+            existing = db.execute('SELECT cap FROM wallets WHERE name=?', (name,)).fetchone()
+            if existing and existing['cap'] != cap:
+                raise ValueError('Cannot silently change an existing wallet cap')
+            db.execute('INSERT OR IGNORE INTO wallets VALUES (?,?)', (name, cap))
+
+    def reserve(self, call_id, wallet, model, amount, *, scopes=None):
+        if not isinstance(amount, (int, float)) or not math.isfinite(amount) or amount < 0:
+            raise ValueError('Invalid reservation amount')
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT cap FROM wallets WHERE name=?', (wallet,)).fetchone()
+            if not row:
+                raise ValueError('Unknown wallet')
+            used = db.execute('SELECT COALESCE(SUM(COALESCE(charged,reserve)),0) FROM calls WHERE wallet=?', (wallet,)).fetchone()[0]
+            if row['cap'] is not None and used + amount > row['cap'] + 1e-9:
+                raise BudgetExceeded(f'Wallet {wallet}: available ${row["cap"] - used:.6f}, reservation ${amount:.6f}')
+            for scope, cap in (scopes or {}).items():
+                if not isinstance(cap, (int, float)) or not math.isfinite(cap) or cap <= 0:
+                    raise ValueError('Invalid scope budget')
+                prior = db.execute('SELECT wallet,cap FROM budget_scopes WHERE id=?', (scope,)).fetchone()
+                if prior and (prior['wallet'] != wallet or prior['cap'] != cap):
+                    raise ValueError('Cannot change an existing scope budget')
+                db.execute('INSERT OR IGNORE INTO budget_scopes VALUES(?,?,?)', (scope,wallet,cap))
+                spent = db.execute('''SELECT COALESCE(SUM(COALESCE(c.charged,c.reserve)),0)
+                    FROM calls c JOIN call_budget_scopes s ON c.id=s.call_id WHERE s.scope=?''', (scope,)).fetchone()[0]
+                if spent + amount > cap + 1e-9:
+                    error = BudgetExceeded(f'Scope budget exhausted: available ${cap-spent:.6f}, reservation ${amount:.6f}')
+                    error.scope = scope
+                    raise error
+            db.execute('INSERT INTO calls VALUES(?,?,?,?,NULL,?,NULL,?,NULL)',
+                       (call_id, wallet, model, amount, 'reserved', time.time()))
+            db.executemany('INSERT INTO call_budget_scopes VALUES(?,?)', [(call_id,s) for s in (scopes or {})])
+
+    def finish(self, call_id, charge, usage, state):
+        with self.connect() as db:
+            db.execute('UPDATE calls SET charged=?,usage=?,state=?,finished=? WHERE id=?',
+                       (charge, json.dumps(usage), state, time.time(), call_id))
+
+    def status(self, wallet=None):
+        with self.connect() as db:
+            wallets = db.execute('SELECT * FROM wallets' + (' WHERE name=?' if wallet else ''), (wallet,) if wallet else ()).fetchall()
+            out = []
+            for w in wallets:
+                row = db.execute('SELECT COUNT(*) AS calls, COALESCE(SUM(charged),0) AS charged, COALESCE(SUM(CASE WHEN charged IS NULL THEN reserve ELSE 0 END),0) AS outstanding FROM calls WHERE wallet=?', (w['name'],)).fetchone()
+                out.append(dict(w) | dict(row))
+            return out

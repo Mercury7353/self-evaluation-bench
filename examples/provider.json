@@ -1,0 +1,18 @@
+{
+  "upstream": "https://YOUR_ANTHROPIC_COMPATIBLE_PROVIDER",
+  "key_env": "SEB_PROVIDER_API_KEY",
+  "budget_usd": 5,
+  "suite_cost_cap_usd": 5,
+  "item_cost_cap_usd": 1,
+  "minimum_items": 2,
+  "timeout_seconds": 7200,
+  "model_concurrency": 2,
+  "request_concurrency_per_model": 2,
+  "models": [
+    {
+      "id": "candidate-a",
+      "model": "REPLACE_WITH_PROVIDER_MODEL_ID",
+      "price": {"input": 1.0, "output": 1.0, "cache_write_multiplier": 1, "reservation_output_headroom": 1.0}
+    }
+  ]
+}
