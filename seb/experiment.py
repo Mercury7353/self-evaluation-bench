@@ -124,6 +124,13 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
                 'workspace':str(out/'researcher-work'),'research':True,'deadline_epoch':time.time()+cfg['design']['seconds']},
             tokens['evaluation']:{'wallet':'evaluation','cap':budget['evaluation_usd'],
                 'models':[m['id'] for m in cfg['models']],'workspace':str(out/'acceptance-input'),'allow_suite':True,'start_deadline_on_first_suite':cfg['evaluation']['seconds']}}}
+    if budget.get('judge_usd'):
+        config['tokens'][secrets.token_hex(32)]={'wallet':'judge','cap':budget['judge_usd'],'models':[]}
+    if cfg['evaluation']['preflight']:
+        tokens['preflight']=secrets.token_hex(32)
+        config['tokens'][tokens['preflight']]={'wallet':'development','cap':budget['development_usd'],
+            'models':[m['id'] for m in cfg['models']],'research':True,'workspace':str(out/'readiness'),
+            'deadline_epoch':config['research_deadline_epoch']}
     for model in all_models:reservation({'max_tokens':cfg['evaluation']['policy']['default_output_tokens'],'messages':[]},model['price'])
     return config,tokens
 
@@ -195,6 +202,7 @@ def accounting(out, cfg):
             estimates=[cache_adjusted_cost(json.loads(c['usage'] or '{}'),prices[row['model']]) if c['charged'] is not None else None for c in calls]
             row['cache_adjusted_estimate_usd']=sum(estimates) if all(v is not None for v in estimates) else None
     limits={'designer':cfg['budgets']['researcher_usd'],'development':cfg['budgets']['development_usd'],'evaluation':cfg['budgets']['evaluation_usd']}
+    if 'judge_usd' in cfg['budgets']:limits['judge']=cfg['budgets']['judge_usd']
     closed=[w['name'] for w in wallets if w['cap']==0]
     with ledger.connect() as db:
         violations=[dict(r) for r in db.execute('SELECT s.id,s.wallet,s.cap,SUM(c.charged) AS charged FROM budget_scopes s JOIN call_budget_scopes cs ON cs.scope=s.id JOIN calls c ON c.id=cs.call_id GROUP BY s.id HAVING SUM(c.charged)>s.cap+1e-9')]
@@ -230,6 +238,15 @@ def run(config_path, researcher_id, output, *, mock=False):
                 mock_url=f'http://127.0.0.1:{server.server_port}' if server else None)
             process=start_gateway(config,out)
             try:
+                if cfg['evaluation']['preflight']:
+                    update(phase='preflight')
+                    readiness=out/'readiness';readiness.mkdir()
+                    mock_submission(readiness)
+                    ready=run_jobs(config,tokens['preflight'],[m['id'] for m in cfg['models']],'submission',
+                        out/'preflight-jobs',min(time.time()+3600,config['research_deadline_epoch']),pilot=True)
+                    write(out/'preflight.json',{'models':len(ready),'transport_complete':all(r.get('score_status')=='valid' for r in ready),
+                        'note':'Correctness is not a transport gate; completed empty/wrong answers are retained.'})
+                    if not all(r.get('score_status')=='valid' for r in ready):raise RuntimeError('Model transport preflight incomplete; no researcher launched')
                 work=prepare_workspace(cfg,config,tokens,out)
                 root=out/'researcher-rootfs'
                 if not mock:shutil.copytree(cfg['runtime']['rootfs'],root,symlinks=True)
@@ -241,12 +258,12 @@ def run(config_path, researcher_id, output, *, mock=False):
                     update(phase='designing',round=index+1)
                     if mock:mock_submission(work)
                     else:
-                        prompt=TASK+f'\nThis is round {index+1}/{cfg["design"]["rounds"]}. Remaining design time: {remaining} seconds.\n'
+                        prompt=TASK+f'\nEach checkpoint is limited to {cfg["design"]["checkpoint_seconds"]} seconds.\nThis is round {index+1}/{cfg["design"]["rounds"]}. Remaining design time: {remaining} seconds.\n'
                         if researcher.get('prompt_file'):prompt+='\nOperator task instructions:\n'+Path(researcher['prompt_file']).read_text()
                         if feedback_file:prompt+='\nReview the previous white-box feedback at '+feedback_file+' and revise if useful.\n'
                         trace=out/f'researcher-trace-{index+1}'
                         rc=launch_claude(root,work,trace,config['gateway_socket'],tokens['designer'],researcher['id'],prompt,
-                            timeout=remaining,effort=researcher.get('effort'),resume_session=previous_session,
+                            timeout=min(remaining,cfg['design']['checkpoint_seconds']),effort=researcher.get('effort'),resume_session=previous_session,
                             extra_env={'SEB_CONTEXT':'/workspace/access.json','PYTHONPATH':'/workspace:/opt/science'},
                             extra_binds=[(cfg['runtime']['science_packages'],'/opt/science',True)])
                         check_designer_exit(trace,rc);previous_session=session_id(trace)

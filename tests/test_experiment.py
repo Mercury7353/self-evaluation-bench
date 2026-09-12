@@ -86,8 +86,11 @@ def test_mock_full_pipeline(tmp_path,monkeypatch):
     path,cfg=fixture_config(tmp_path)
     cfg['runtime']={'rootfs':root,'science_packages':science}
     cfg['design']['rounds']=2
+    cfg['evaluation']['preflight']=True
+    cfg['budgets']['judge_usd']=2
     path.write_text(yaml.safe_dump(cfg));out=tmp_path/'run'
     result=run(path,None,out,mock=True)
+    assert json.loads((out/'preflight.json').read_text())['transport_complete']
     assert result['eligible'] and result['paid_api_calls']==0
     assert result['complete_models']==result['expected_models']==6
     assert result['overall']['score'] is not None

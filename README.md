@@ -40,8 +40,8 @@ Start from [examples/experiment.yaml](examples/experiment.yaml). Replace every p
 | `benchmarks.whitebox` | Visible target IDs, reference JSON, scale and resource paths |
 | `benchmarks.blackbox` | Hidden target IDs and reference JSON; never copied into the researcher workspace |
 | `budgets` | Separate researcher, development and acceptance wallets; per-suite and per-item limits |
-| `design` | Maximum rounds, total development seconds, minimum final item count |
-| `evaluation` | Acceptance deadline, model/request concurrency and candidate output/retry policy |
+| `design` | Maximum rounds, per-checkpoint/total development seconds, minimum final item count |
+| `evaluation` | Acceptance deadline, optional model preflight, concurrency and candidate output/retry policy |
 | `overall` | Aggregate definition, source and completeness rules |
 
 Reference JSON maps candidate IDs to finite numeric target scores, e.g. `{"dev-a": 0.42, "dev-b": 0.61}`. Target scale is the reference's native range (e.g. `1` or `100`). Missing references are frozen exclusions, reported explicitly. Use a consistent scoring direction where higher is better. Actual datasets and labels belong outside Git. Each supplied white-box resource is copied to the researcher's isolated workspace; curate it so it contains only information you intend to expose.
@@ -66,7 +66,9 @@ The researcher receives the neutral task/contract, SDK, development model IDs, v
 
 The submission contains `run.py`, `evaluation.json`, `README.md`, and any required assets. A suite runs once for each candidate under a scoped context, produces scored items with call/agent evidence, and declares its fixed aggregation or adaptive selection rule. See [the executable toy example](examples/arithmetic/) and `seb/research_sdk.py`. An optional `predictor.py` implements `fit(training_rows, target_metadata)` and `predict(fitted, observations)`; it receives anonymous numeric item measurements rather than candidate identities. Optional predictor assets go in `predictor_assets/`.
 
-Every round shares the original development wallet and total development deadline. The controller snapshots the submission, evaluates development models, and provides visible-target feedback for the next configured round. Exact unchanged snapshots reuse their earliest development job IDs, including wrong and empty answers. Each round must produce a valid submission. The predeclared selection policy is the **last valid round**; acceptance results never select a checkpoint. If the researcher consumes the full development time, controller feedback can be incomplete; the frozen valid submission can still enter acceptance.
+`evaluation.preflight: true` checks all configured candidate transports through the same metered pipeline before researcher launch. These calls use the development wallet and deadline. Wrong/empty delivered answers do not fail transport readiness. Optional `budgets.judge_usd` reserves a separate, currently inaccessible judge wallet.
+
+Every round shares the original development wallet and total development deadline; `design.checkpoint_seconds` bounds each researcher turn (default at most two hours). The controller snapshots the submission, evaluates development models, and provides visible-target feedback for the next configured round. Exact unchanged snapshots reuse their earliest development job IDs, including wrong and empty answers. Each round must produce a valid submission. The predeclared selection policy is the **last valid round**; acceptance results never select a checkpoint. If the researcher consumes the full development time, controller feedback can be incomplete; the frozen valid submission can still enter acceptance.
 
 Final acceptance measures all configured candidates afresh under its separate wallet. Submission files, reference/config hashes, and job IDs are persisted. No automatic researcher restart, budget reset, or answer-dependent retry occurs. Infrastructure retries are bounded by the frozen execution policy. Empty/refused/invalid delivered answers score zero; missing execution is unscored and marks coverage incomplete.
 

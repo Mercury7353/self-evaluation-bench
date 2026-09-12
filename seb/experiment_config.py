@@ -76,12 +76,15 @@ def load(path, *, resolve_inputs=True):
         if researcher.get('prompt_file'):researcher['prompt_file']=local(researcher['prompt_file'])
     budgets=cfg.get('budgets',{})
     for name in ['researcher_usd','development_usd','evaluation_usd','suite_usd','item_usd']:positive(budgets.get(name),'budgets.'+name)
-    design=cfg.setdefault('design',{});design.setdefault('rounds',1);design.setdefault('seconds',3600);design.setdefault('minimum_items',100)
-    for k in ['rounds','seconds','minimum_items']:
+    design=cfg.setdefault('design',{});design.setdefault('rounds',1);design.setdefault('seconds',3600);design.setdefault('minimum_items',100);design.setdefault('checkpoint_seconds',min(7200,design['seconds']))
+    for k in ['rounds','seconds','minimum_items','checkpoint_seconds']:
         if type(design[k]) is not int or design[k]<1:raise ValueError('design.'+k+' must be a positive integer')
     evaluation=cfg.setdefault('evaluation',{});evaluation.setdefault('seconds',7200);evaluation.setdefault('model_concurrency',2);evaluation.setdefault('requests_per_model',2)
     for k in ['seconds','model_concurrency','requests_per_model']:
         if type(evaluation[k]) is not int or evaluation[k]<1:raise ValueError('evaluation.'+k+' must be a positive integer')
+    evaluation.setdefault('preflight',False)
+    if type(evaluation['preflight']) is not bool:raise ValueError('evaluation.preflight must be boolean')
+    if 'judge_usd' in budgets:positive(budgets['judge_usd'],'budgets.judge_usd')
     evaluation['policy']=DEFAULT_POLICY | evaluation.get('policy',{});policy_for({'evaluation_policy':evaluation['policy']})
     overall=cfg.setdefault('overall',{});overall.setdefault('metric','macro_spearman');overall.setdefault('source','family_cv');overall.setdefault('minimum_models',3);overall.setdefault('constant_prediction','zero')
     if overall['metric']!='macro_spearman' or overall['source'] not in ['family_cv','raw_mean']:raise ValueError('overall uses macro_spearman with source family_cv or raw_mean')
