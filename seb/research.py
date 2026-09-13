@@ -132,7 +132,8 @@ def run_suite(source,model,token,config,output,entry):
         # The entry's workspace is resolved by the server, never sent by a client.
         child_token=uuid.uuid4().hex
         child_entry={k:v for k,v in entry.items() if k not in ('workspace','research','_active_workspace')}
-        child_entry.update(workspace=str(work),research=False,allow_suite=False,models=list(dict.fromkeys([model]+config.get('auxiliary_models',[]))),
+        child_entry.update(workspace=str(work),research=False,allow_suite=False,
+                           candidate_models=[model],models=list(dict.fromkeys([model]+config.get('auxiliary_models',[]))),
                            trace_scopes=list(dict.fromkeys(entry.get('trace_scopes',[])+[scope])))
         if config.get('require_item_budgets'):
             child_entry.update(budget_scopes={**entry.get('budget_scopes',{}),
@@ -140,10 +141,11 @@ def run_suite(source,model,token,config,output,entry):
                                item_scope_prefix='item:'+scope+':',allowed_item_ids=list({i.get('budget_group',i['id']) for i in manifest['items']}))
         config['tokens'][child_token]=child_entry
         context={'model':model,'token':child_token,'base_url':'http://127.0.0.1:18765',
-                 'output_dir':'/workspace/raw','efforts':config.get('efforts',{}),'budget_usd':entry['cap']}
+                 'output_dir':'/workspace/raw',
+                 'efforts':{m:config.get('efforts',{}).get(m) for m in child_entry['models']},'budget_usd':entry['cap']}
         if protocol:
-            context.update(public_contract(config,entry),execution_id=scope,seed=config.get('evaluation_seed',0),
-                           submission_sha256=before,efforts={model:config.get('efforts',{}).get(model)})
+            context.update(public_contract(config,child_entry),execution_id=scope,seed=config.get('evaluation_seed',0),
+                           submission_sha256=before)
         ctx=output/'context.private.json';ctx.write_text(json.dumps(context));ctx.chmod(0o600)
         command=['/usr/local/bin/python','/workspace/run.py','--context','/run/context.json','--output','/workspace/result.json']
         launch=output/'launch.private.json';launch.write_text(json.dumps({'command':command,'cwd':'/workspace','env':{'SEB_CONTEXT':'/run/context.json','PYTHONPATH':'/opt:/opt/science'}}));launch.chmod(0o600)
@@ -159,7 +161,7 @@ def run_suite(source,model,token,config,output,entry):
         result=json.loads((work/'result.json').read_text())
         ledger=Ledger(Path(config['artifacts'])/'ledger.sqlite')
         if protocol:
-            result=normalize_result(result,manifest,ledger,entry['wallet'],started,Path(config['artifacts']).parent/'research-jobs')
+            result=normalize_result(result,manifest,ledger,entry['wallet'],started,Path(config['artifacts']).parent/'research-jobs',candidate_model=model)
             if config.get('require_item_budgets'):
                 from .evidence import check_budget_evidence
                 check_budget_evidence(result,manifest,ledger,scope,Path(config['artifacts']).parent/'research-jobs')
@@ -195,12 +197,15 @@ def research_app(config):
         return token,config['tokens'].get(token)
     def workspace(entry):
         return entry.get('_active_workspace') or entry.get('workspace') or config.get('workspace')
+    def candidates(entry):
+        return [m for m in entry.get('candidate_models',entry['models'])
+                if m in entry['models'] and m not in config.get('auxiliary_models',[])]
 
     @app.get('/research/info')
     async def info(request:Request):
         token,entry=access(request)
         if not entry:return JSONResponse({'error':'Unauthorized'},401)
-        return {'models':entry['models'],'contract':public_contract(config,entry),
+        return {'models':candidates(entry),'contract':public_contract(config,entry),
                 'efforts':{m:config.get('efforts',{}).get(m) for m in entry['models']}}
 
     @app.post('/research/feedback')
@@ -248,7 +253,7 @@ def research_app(config):
             output_tokens=output_limit(config,data.get('max_output_tokens'),entry)
             if 'max_output_tokens' in data and kind!='agent':raise ValueError('max_output_tokens applies to agent tasks only')
             model=data['model']
-            if model not in entry['models']:raise ValueError('Model not allowed')
+            if model not in candidates(entry):raise ValueError('Candidate model not allowed for suite/agent execution')
             rel=str(data['path'])
             if rel.startswith('/workspace/'):rel=rel[len('/workspace/'):]
             elif rel.startswith('/'):raise ValueError('Use a workspace-relative path')
@@ -284,7 +289,7 @@ def research_app(config):
                         dict(entry,minimum_items=1,_pilot=True) if pilot else entry)
                     else:
                         agent_token=uuid.uuid4().hex
-                        config['tokens'][agent_token]=dict(entry,research=False,allow_suite=False,models=[model],
+                        config['tokens'][agent_token]=dict(entry,research=False,allow_suite=False,models=[model],candidate_models=[model],
                             trace_scopes=list(dict.fromkeys(entry.get('trace_scopes',[])+[ident])))
                         if config.get('require_item_budgets'):
                             config['tokens'][agent_token]['budget_scopes']=agent_scopes

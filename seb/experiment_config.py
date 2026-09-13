@@ -27,7 +27,7 @@ def identifier(value,name):
 def load(path, *, resolve_inputs=True):
     path=Path(path).resolve();cfg=yaml.safe_load(path.read_text())
     if not isinstance(cfg,dict) or cfg.get('version')!=1:raise ValueError('YAML version: 1 required')
-    allowed={'version','name','runtime','providers','researchers','models','benchmarks','budgets','design','evaluation','overall','domain_protocol','response_cache'}
+    allowed={'version','name','runtime','providers','researchers','models','auxiliary_models','benchmarks','budgets','design','evaluation','overall','domain_protocol','response_cache'}
     unknown=set(cfg)-allowed
     if unknown:raise ValueError('Unknown YAML fields: '+', '.join(sorted(unknown)))
     cfg=copy.deepcopy(cfg);cfg['name']=identifier(cfg.get('name'),'name')
@@ -51,10 +51,13 @@ def load(path, *, resolve_inputs=True):
         if provider.get('wire_api','anthropic') not in ('anthropic','openai_responses'):
             raise ValueError('Provider wire_api must be anthropic or openai_responses')
     models=cfg.get('models',[]);researchers=cfg.get('researchers',[])
+    auxiliary=cfg.get('auxiliary_models',[])
+    if not isinstance(auxiliary,list):raise ValueError('auxiliary_models must be a list')
     if not models or not researchers:raise ValueError('Nonempty models and researchers lists required')
-    for group,label in [(models,'model'),(researchers,'researcher')]:
+    for group,label in [(models,'model'),(researchers,'researcher'),(auxiliary,'auxiliary model')]:
         ids=[]
         for item in group:
+            if not isinstance(item,dict):raise ValueError(label+' must be a mapping')
             ids.append(identifier(item.get('id'),label+' id'))
             if item.get('provider') not in providers:raise ValueError('Unknown provider for '+item['id'])
             if not item.get('model'):raise ValueError('Provider model name required')
@@ -74,6 +77,16 @@ def load(path, *, resolve_inputs=True):
                     if key=='cache_read_multiplier' and v>1:raise ValueError('cache_read_multiplier must be in [0,1]')
         if len(ids)!=len(set(ids)):raise ValueError('Duplicate '+label+' IDs')
     if set(m['id'] for m in models) & set(r['id'] for r in researchers):raise ValueError('Researcher and candidate IDs must be distinct')
+    if {a['id'] for a in auxiliary} & {m['id'] for m in models+researchers}:
+        raise ValueError('Auxiliary IDs must be distinct from researcher and candidate IDs')
+    for helper in auxiliary:
+        roles=helper.get('roles')
+        if not isinstance(roles,list) or not roles or any(r not in ('grader','simulator') for r in roles) or len(set(roles))!=len(roles):
+            raise ValueError('Auxiliary roles must be a nonempty unique list of grader/simulator')
+        if 'split' in helper or 'family' in helper or 'harness' in helper:
+            raise ValueError('Auxiliary models are not candidate or researcher panel members')
+        if helper['model'] in {m['model'] for m in models if m.get('split')=='holdout'}:
+            raise ValueError('Auxiliary model cannot expose a held-out candidate backend')
     if len({m['family'] for m in models if m['split']=='development'})<2:raise ValueError('At least two development model families required')
     if not cfg.get('domain_protocol') and {m['family'] for m in models if m['split']=='development'} & {m['family'] for m in models if m['split']=='holdout'}:raise ValueError('Holdout families must be disjoint from development families')
     for model in models:
@@ -183,9 +196,16 @@ def load(path, *, resolve_inputs=True):
     return cfg
 
 
+def auxiliary_view(cfg):
+    """Public helper handles and frozen costs, without backend identities or keys."""
+    return [{k:copy.deepcopy(m[k]) for k in ('id','roles','price','effort') if k in m}
+            for m in cfg.get('auxiliary_models',[])]
+
+
 def researcher_view(cfg):
     development={m['id'] for m in cfg['models'] if m['split']=='development'}
-    return {'models':sorted(development),'targets':{
+    return {'models':sorted(development),
+        **({'auxiliary_models':auxiliary_view(cfg)} if cfg.get('auxiliary_models') else {}),'targets':{
         t['id']:{'scale':t['scale'],**({'domain':t['domain']} if 'domain' in t else {}),
                  'scores':{m:s for m,s in cfg['_references'][t['id']].items() if m in development}}
         for t in cfg['benchmarks']['whitebox']},
@@ -198,5 +218,6 @@ def describe(cfg):
     return {'name':cfg['name'],'researchers':[{'id':r['id'],'harness':r['harness'],'model':r['model']} for r in cfg['researchers']],
             'development_models':[m['id'] for m in cfg['models'] if m['split']=='development'],
             'holdout_models':[m['id'] for m in cfg['models'] if m['split']=='holdout'],
+            'auxiliary_models':auxiliary_view(cfg),
             'whitebox':[t['id'] for t in cfg['benchmarks']['whitebox']], 'blackbox':[t['id'] for t in cfg['benchmarks']['blackbox']],
             'budgets_per_researcher_run':cfg['budgets'],'overall':cfg['overall'],'paid_api_calls':0}

@@ -206,6 +206,57 @@ not research tasks or benchmark questions. A provider model listing is weaker
 evidence than a successful inference probe, and neither verifies a complete CLI
 research session. Never place the private configuration in this repository.
 
+## Grader and simulated-user models
+
+Optional `auxiliary_models` entries configure fixed measurement components. They
+use the same `provider`, `model`, `price`, optional `effort` and native Responses
+limits as candidate entries, plus `roles: [grader]`, `[simulator]`, or both:
+
+```yaml
+auxiliary_models:
+  - id: grader-01
+    roles: [grader]
+    provider: inference
+    model: REPLACE_WITH_FROZEN_GRADER_MODEL
+    # Placeholder USD per million tokens: verify before running.
+    price: {input: 1.0, output: 1.0}
+```
+
+Helpers are separate from candidate/researcher panels. Their IDs must be distinct;
+a helper backend cannot be a held-out candidate backend. The operator must also
+check provider aliases when freezing the configuration. The researcher receives
+only helper handles, roles, prices and effort. The provider model and credentials
+remain private. Helpers cannot be submitted as suite or candidate-agent targets.
+
+Use helpers inside a budgeted suite/pilot. For a single-response graded item:
+
+```python
+def grade(text):
+    reply = c.chat(f"{frozen_judge_prompt}\nResponse: {text}",
+                   model="grader-01", item_id="item-01")
+    # The frozen parser must distinguish an invalid/empty judge response from
+    # a candidate's wrong answer. Program defects should raise, not score zero.
+    score = parse_judge_response(reply["text"])
+    return {"score": score, "answer_status": "answered",
+            "evidence": [reply["evidence"]]}
+
+item = c.item("item-01", question, grade)
+```
+
+The SDK preserves both evidence IDs. A grader API failure produces an incomplete
+item and does not repeat the candidate answer. Other grader exceptions propagate.
+For multi-turn simulation, retain every candidate and simulator evidence ID in
+the item result. Calls for a declared `budget_group` use that group as `item_id`.
+Every completed item must contain evidence from the evaluated candidate. Evidence
+from another wallet, execution or item budget is rejected.
+
+Candidate, grader and simulator calls share the original development/evaluation
+wallet, item cap and suite cap. There is no extra helper allowance. Unknown usage
+remains reserved; model-level accounting includes helper costs and cache estimates.
+Helpers inherit the existing 32k–128k output policy and bounded infrastructure
+retries. Freeze helper settings before research; this interface alone does not
+establish equivalence to any benchmark's official grader or simulator protocol.
+
 ## Native Codex researcher
 
 From this checkout, install the pinned official SDK and CLI with

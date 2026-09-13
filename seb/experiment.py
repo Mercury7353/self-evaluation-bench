@@ -63,6 +63,16 @@ Persist intermediate results atomically. Do not catch program bugs and turn them
 `Client.agent(task_path, item_id=...)` also supports a single-container Harbor task through Claude Code;
 it requires the optional agent dependencies and an available task image.
 
+If configured, `auxiliary_models` lists fixed grader/simulator handles separately from candidates.
+Inside a suite, call `c.chat(..., model="helper-id", item_id=item_id)` and return its evidence
+alongside the candidate evidence. A grader may return `{"score": ..., "answer_status": "answered",
+"evidence": [helper_reply["evidence"]]}`; `c.item` merges that list with the candidate call.
+All helper calls consume the same development/evaluation wallet and item/suite limits, including
+unknown usage reservations. They inherit the frozen output/retry policy. Helper IDs cannot be
+suite/agent targets; every completed item must include the evaluated candidate's own evidence.
+A grader API failure leaves the item incomplete without repeating the candidate answer.
+Record helper prompts, parsing and failure handling in the frozen submission, as with local graders.
+
 `evaluation.json` example (extend to the required item count):
 ```json
 {"protocol_version":1,"items":[{"id":"example"}],"selection":"fixed","aggregation":{"kind":"weighted_mean"}}
@@ -176,7 +186,10 @@ def joint_domains(cfg):
 
 
 def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
-    all_models=([researcher] if researcher else [])+cfg['models']
+    from .experiment_config import auxiliary_view
+    auxiliary=cfg.get('auxiliary_models',[])
+    helper_ids=[m['id'] for m in auxiliary]
+    all_models=([researcher] if researcher else [])+cfg['models']+auxiliary
     used={m['provider'] for m in all_models}
     secretfiles={}
     for pid in sorted(used):
@@ -199,6 +212,7 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
                             **({'wire_api':'openai_responses','effort':m['effort'],'native_limits':m['native_limits']}
                                if cfg['providers'][m['provider']].get('wire_api')=='openai_responses' else {})} for m in all_models},
         'efforts':{m['id']:m['effort'] for m in all_models if m.get('effort')},
+        'auxiliary_models':helper_ids,'auxiliary_model_info':auxiliary_view(cfg),
         'evaluation_policy':cfg['evaluation']['policy'],'minimum_items':cfg['design']['minimum_items'],
         'require_item_budgets':True,'allow_pilots':True,'suite_cost_cap_usd':budget['suite_usd'],
         'item_cost_cap_usd':budget['item_usd'],'suite_cost_goal_usd':budget['suite_usd'],
@@ -211,7 +225,8 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
         'whitebox':{'models':[m for m in cfg['models'] if m['split']=='development'],
             'references':{t:row['scores'] for t,row in researcher_view(cfg)['targets'].items()},
             'targets':metadata(cfg,'whitebox')},
-        'tokens':{tokens['development']:{'wallet':'development','cap':budget['development_usd'],'models':development,
+        'tokens':{tokens['development']:{'wallet':'development','cap':budget['development_usd'],
+                'models':development+helper_ids,'candidate_models':development,
                 'workspace':str(out/'researcher-work'),'research':True,'deadline_epoch':time.time()+cfg['design']['seconds']},
             tokens['evaluation']:{'wallet':'evaluation','cap':budget['evaluation_usd'],
                 'models':[m['id'] for m in cfg['models'] if not cfg.get('domain_protocol') or m['split']=='holdout'],'workspace':str(out/'acceptance-input'),'allow_suite':True,'start_deadline_on_first_suite':cfg['evaluation']['seconds']}}}
@@ -231,7 +246,8 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
     if cfg['evaluation']['preflight']:
         tokens['preflight']=secrets.token_hex(32)
         config['tokens'][tokens['preflight']]={'wallet':'development','cap':budget['development_usd'],
-            'models':[m['id'] for m in cfg['models']],'research':True,'workspace':str(out/'readiness'),
+            'models':[m['id'] for m in cfg['models']]+helper_ids,
+            'candidate_models':[m['id'] for m in cfg['models']],'research':True,'workspace':str(out/'readiness'),
             'deadline_epoch':config['research_deadline_epoch']}
     for model in all_models:reservation({'max_tokens':cfg['evaluation']['policy']['default_output_tokens'],'messages':[]},model['price'])
     return config,tokens
@@ -253,6 +269,7 @@ def prepare_workspace(cfg, config, tokens, out):
             if src.is_dir():shutil.copytree(src,dest,symlinks=False)
             else:shutil.copy2(src,dest)
     context={'token':tokens['development'],'models':researcher_view(cfg)['models'],
+        'efforts':{m:config.get('efforts',{}).get(m) for m in config['tokens'][tokens['development']]['models']},
         'base_url':'http://127.0.0.1:18765','output_dir':'/workspace/client-artifacts',
         **public_contract(config,config['tokens'][tokens['development']])}
     write(work/'access.json',context);(work/'access.json').chmod(0o600)
@@ -304,7 +321,7 @@ def accounting(out, cfg):
     with ledger.connect() as db:
         rows=[dict(r) for r in db.execute('SELECT wallet, model, SUM(charged) AS metered_usd, SUM(CASE WHEN charged IS NULL THEN reserve ELSE 0 END) AS outstanding_reserved_usd, COUNT(*) AS calls FROM calls GROUP BY wallet,model')]
         unknown=db.execute('SELECT COUNT(*) FROM calls WHERE charged IS NULL').fetchone()[0]
-    prices={m['id']:m['price'] for m in cfg['models']+cfg['researchers']}
+    prices={m['id']:m['price'] for m in cfg['models']+cfg['researchers']+cfg.get('auxiliary_models',[])}
     with ledger.connect() as db:
         for row in rows:
             calls=db.execute('SELECT c.id,c.usage,c.charged,r.call_id AS replay FROM calls c LEFT JOIN cache_replays r ON r.call_id=c.id WHERE wallet=? AND model=?',(row['wallet'],row['model'])).fetchall()
@@ -346,7 +363,7 @@ def run(config_path, researcher_id, output, *, mock=False):
     if (researcher['harness']=='mock')!=mock:raise ValueError('Mock harness requires --mock; --mock cannot substitute for a real researcher')
     if mock and cfg['design']['minimum_items']!=2:raise ValueError('The mock fixture requires minimum_items: 2')
     doctor(cfg['runtime']['rootfs'])
-    if not mock and any('REPLACE' in m['model'] or 'YOUR_' in cfg['providers'][m['provider']]['upstream'] for m in [researcher,*cfg['models']]):raise ValueError('Replace example model and provider placeholders before a paid run')
+    if not mock and any('REPLACE' in m['model'] or 'YOUR_' in cfg['providers'][m['provider']]['upstream'] for m in [researcher,*cfg['models'],*cfg.get('auxiliary_models',[])]):raise ValueError('Replace example model and provider placeholders before a paid run')
     if not mock and researcher['harness']=='claude_code' and not shutil.which('claude'):
         raise ValueError('Install the native Claude Code executable for this harness')
     if researcher['harness']=='codex':

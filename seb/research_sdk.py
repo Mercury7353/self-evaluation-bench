@@ -85,8 +85,10 @@ class Client:
     def item(self,item_id,prompt,grader,**kwargs):
         """Run once through platform retry policy, then grade once; no answer retries.
 
-        grader(text) returns a score in [0,1], or a dict with score and answer_status
-        (e.g. invalid). Grader exceptions propagate as program defects, not wrong answers.
+        grader(text) returns a score in [0,1], or a dict with score, answer_status
+        and an optional evidence list. Helper calls must use the same item/budget group.
+        A grader API failure leaves the item incomplete without retrying its answer;
+        other grader exceptions propagate as program defects, not wrong answers.
         """
         try:
             reply=self.chat(prompt,item_id=item_id,**kwargs)
@@ -95,9 +97,21 @@ class Client:
                        'budget_exhausted' if error.category=='budget_exceeded' else 'not_run')
             return {'id':item_id,'score':None,'execution_status':execution,'answer_status':'not_applicable',
                     'evidence':error.evidence,'operation_id':error.operation_id,'error_category':error.category}
-        graded=grader(reply['text']) if reply['text'].strip() else {'score':0,'answer_status':'missing'}
+        try:
+            graded=grader(reply['text']) if reply['text'].strip() else {'score':0,'answer_status':'missing'}
+        except EvaluationError as error:
+            execution=('infra_error' if error.category=='infra_error' else
+                       'budget_exhausted' if error.category=='budget_exceeded' else 'not_run')
+            return {'id':item_id,'score':None,'execution_status':execution,'answer_status':'not_applicable',
+                    'evidence':[reply['evidence'],*error.evidence],'error_stage':'grading',
+                    'answer_operation_id':reply['operation_id'],'operation_id':error.operation_id,
+                    'error_category':error.category}
         if not isinstance(graded,dict):graded={'score':graded,'answer_status':'answered'}
-        return {'id':item_id,**graded,'execution_status':'completed','evidence':[reply['evidence']],
+        extra=graded.get('evidence',[])
+        if not isinstance(extra,list):raise ValueError('Grader evidence must be a list')
+        if graded.get('execution_status','completed')!='completed':
+            raise ValueError('Return incomplete items explicitly; a grader result must be completed')
+        return {**graded,'id':item_id,'execution_status':'completed','evidence':[reply['evidence'],*extra],
                 'finish_reason':reply['finish_reason'],'operation_id':reply['operation_id'],
                 'attempt_count':reply['attempt_count']}
 

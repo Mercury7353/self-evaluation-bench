@@ -72,7 +72,7 @@ def run(config_path, submission, output, *, name='fixed', mock=False,
         raise ValueError('Unknown fixed baseline kind')
     if cfg['evaluation']['preflight']:
         raise ValueError('Run transport calibration separately; a fixed baseline does not repeat it')
-    if not mock and any('REPLACE' in m['model'] or 'YOUR_' in cfg['providers'][m['provider']]['upstream'] for m in cfg['models']):
+    if not mock and any('REPLACE' in m['model'] or 'YOUR_' in cfg['providers'][m['provider']]['upstream'] for m in cfg['models']+cfg.get('auxiliary_models',[])):
         raise ValueError('Replace candidate and provider placeholders before a paid baseline run')
     source=Path(submission).resolve()
     load_manifest(source,cfg['design']['minimum_items'],domains=joint_domains(cfg))
