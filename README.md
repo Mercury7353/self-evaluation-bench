@@ -46,7 +46,7 @@ Start from [examples/experiment.yaml](examples/experiment.yaml). Replace every p
 
 Reference JSON maps candidate IDs to finite numeric target scores, e.g. `{"dev-a": 0.42, "dev-b": 0.61}`. Target scale is the reference's native range (e.g. `1` or `100`). Missing references are frozen exclusions, reported explicitly. Use a consistent scoring direction where higher is better. Actual datasets and labels belong outside Git. Each supplied white-box resource is copied to the researcher's isolated workspace; curate it so it contains only information you intend to expose.
 
-At least three development models and two development families are required. Holdout families must be disjoint from development families. More models/targets are needed for reliable scientific comparisons; a valid run is not a statistical significance claim.
+At least three development models and two development families are required. The legacy protocol requires disjoint holdout families. Domain protocol v1 also permits different configurations from a development family. More models/targets are needed for reliable scientific comparisons; a valid run is not a statistical significance claim.
 
 ```bash
 # Export the API key through your usual secret-management mechanism first.
@@ -84,6 +84,45 @@ For each eligible black-box target, compute Spearman correlation between its ref
 Also retain Pearson/Spearman per target, raw score correlations, family CV, and a separate predictor trained **only on development models** and evaluated on new model families. Black-box family CV uses training-fold labels after the design is frozen; it measures transfer of a frozen measurement/prediction procedure, **not zero-shot prediction of unseen target labels**. The new-family diagnostic uses a stricter train/development split. Reusing visible feedback across rounds is adaptive development, not hidden validation.
 
 `result.json` reports the aggregate and `eligible` separately. Eligibility requires a complete candidate panel, defined overall, settled accounting, and budgets respected. Do not rank incomplete/ineligible runs using `diagnostic_available_target_mean`. Small panels, heterogeneous target protocols and correlated targets limit interpretation; keep them visible when comparing researchers.
+
+## Domain acceptance protocol
+
+Set `domain_protocol: {version: 1, minimum_models: 8, minimum_families: 4}`
+to evaluate two visible targets and two sealed targets separately. Use
+`design.rounds: 1`; researcher-controlled trials and revisions remain available
+throughout that continuous run. Domain mode gives the researcher the full
+`design.seconds` window and defaults its item minimum to one (an interface floor,
+not a quality claim); it rejects a shorter controller checkpoint window.
+
+In this mode, final acceptance invokes only `split: holdout` candidates. Each
+visible target must have development references, and every target must meet the
+configured held-out reference coverage before the runner will spend money.
+`predictor.py` is required; its frozen fit/predict procedure receives only final
+submission development observations and visible development labels. The code
+can load researcher-fitted parameters from `predictor_assets/`. The two sealed
+targets both use the suite's frozen aggregate score, with no target-specific fit,
+sign change, or post-hoc feature selection. `result.json` reports
+`visible_utility` and `sealed_utility` separately. Default legacy family CV and
+its historical scores are unchanged.
+
+The operator must verify target/candidate versions and curate resource files;
+schema validation does not establish scientific reference comparability. The
+current researcher harness remains Claude Code. Native Codex/provider integration,
+equivalent-cost cache charging, and curated online research require separate
+configuration/implementation before using those features.
+
+`seb.campaign.Registry` registers an immutable matrix of researcher/domain/budget
+allocations. An atomic claim allows only one supervisor to claim a given episode;
+it never releases a claim merely because a process timestamp is old. Existing
+handles and artifacts must be inspected on resumption. This registry reserves
+allocation envelopes; actual API calls are metered by each run's ledger.
+
+`python -m seb.provider_probe --config PRIVATE_JSON --output PRIVATE_DIRECTORY`
+performs transport checks against an existing scoped allocation, preserving
+completed operation IDs and unknown charges. It sends ordinary `READY` requests,
+not research tasks or benchmark questions. A provider model listing is weaker
+evidence than a successful inference probe, and neither verifies a complete CLI
+research session. Never place the private configuration in this repository.
 
 ## Artifacts and accounting
 

@@ -27,7 +27,7 @@ def identifier(value,name):
 def load(path, *, resolve_inputs=True):
     path=Path(path).resolve();cfg=yaml.safe_load(path.read_text())
     if not isinstance(cfg,dict) or cfg.get('version')!=1:raise ValueError('YAML version: 1 required')
-    allowed={'version','name','runtime','providers','researchers','models','benchmarks','budgets','design','evaluation','overall'}
+    allowed={'version','name','runtime','providers','researchers','models','benchmarks','budgets','design','evaluation','overall','domain_protocol'}
     unknown=set(cfg)-allowed
     if unknown:raise ValueError('Unknown YAML fields: '+', '.join(sorted(unknown)))
     cfg=copy.deepcopy(cfg);cfg['name']=identifier(cfg.get('name'),'name')
@@ -65,7 +65,7 @@ def load(path, *, resolve_inputs=True):
         if len(ids)!=len(set(ids)):raise ValueError('Duplicate '+label+' IDs')
     if set(m['id'] for m in models) & set(r['id'] for r in researchers):raise ValueError('Researcher and candidate IDs must be distinct')
     if len({m['family'] for m in models if m['split']=='development'})<2:raise ValueError('At least two development model families required')
-    if {m['family'] for m in models if m['split']=='development'} & {m['family'] for m in models if m['split']=='holdout'}:raise ValueError('Holdout families must be disjoint from development families')
+    if not cfg.get('domain_protocol') and {m['family'] for m in models if m['split']=='development'} & {m['family'] for m in models if m['split']=='holdout'}:raise ValueError('Holdout families must be disjoint from development families')
     for model in models:
         identifier(model.get('family'),'model family')
         if model.get('split') not in ['development','holdout']:raise ValueError('Model split must be development or holdout')
@@ -76,9 +76,23 @@ def load(path, *, resolve_inputs=True):
         if researcher.get('prompt_file'):researcher['prompt_file']=local(researcher['prompt_file'])
     budgets=cfg.get('budgets',{})
     for name in ['researcher_usd','development_usd','evaluation_usd','suite_usd','item_usd']:positive(budgets.get(name),'budgets.'+name)
-    design=cfg.setdefault('design',{});design.setdefault('rounds',1);design.setdefault('seconds',3600);design.setdefault('minimum_items',100);design.setdefault('checkpoint_seconds',min(7200,design['seconds']))
+    design=cfg.setdefault('design',{});design.setdefault('rounds',1);design.setdefault('seconds',3600);design.setdefault('minimum_items',1 if cfg.get('domain_protocol') else 100);design.setdefault('checkpoint_seconds',design['seconds'] if cfg.get('domain_protocol') else min(7200,design['seconds']))
     for k in ['rounds','seconds','minimum_items','checkpoint_seconds']:
         if type(design[k]) is not int or design[k]<1:raise ValueError('design.'+k+' must be a positive integer')
+    if 'domain_protocol' in cfg:
+        protocol=cfg['domain_protocol']
+        if not isinstance(protocol,dict) or protocol.get('version')!=1:
+            raise ValueError('domain_protocol.version must be 1')
+        if set(protocol)-{'version','minimum_models','minimum_families'}:
+            raise ValueError('Unknown domain_protocol field')
+        protocol.setdefault('minimum_models',8);protocol.setdefault('minimum_families',4)
+        for key,minimum in [('minimum_models',3),('minimum_families',2)]:
+            if type(protocol[key]) is not int or protocol[key]<minimum:
+                raise ValueError('Invalid domain_protocol.'+key)
+        if design['rounds']!=1:
+            raise ValueError('Domain protocol uses one independent researcher run')
+        if design['checkpoint_seconds']!=design['seconds']:
+            raise ValueError('Domain researcher receives the full configured continuous time window')
     evaluation=cfg.setdefault('evaluation',{});evaluation.setdefault('seconds',7200);evaluation.setdefault('model_concurrency',2);evaluation.setdefault('requests_per_model',2)
     for k in ['seconds','model_concurrency','requests_per_model']:
         if type(evaluation[k]) is not int or evaluation[k]<1:raise ValueError('evaluation.'+k+' must be a positive integer')
@@ -93,6 +107,8 @@ def load(path, *, resolve_inputs=True):
     targets=cfg.get('benchmarks',{});seen=set();cfg['_references']={};cfg['_reference_hashes']={}
     if set(targets)-{'whitebox','blackbox'}:raise ValueError('benchmarks supports whitebox and blackbox lists')
     if not targets.get('whitebox') or not targets.get('blackbox'):raise ValueError('Both whitebox and blackbox targets are required')
+    if cfg.get('domain_protocol') and any(len(targets[v])!=2 for v in ['whitebox','blackbox']):
+        raise ValueError('Domain protocol requires two visible and two sealed targets')
     for visibility in ['whitebox','blackbox']:
         for target in targets[visibility]:
             tid=identifier(target.get('id'),'benchmark id')
@@ -109,6 +125,19 @@ def load(path, *, resolve_inputs=True):
                 cfg['_references'][tid]=refs;cfg['_reference_hashes'][tid]=hashlib.sha256(Path(target['reference']).read_bytes()).hexdigest()
                 for resource in target['resources']:
                     if not Path(resource).exists():raise ValueError('Missing white-box resource: '+resource)
+    if cfg.get('domain_protocol') and resolve_inputs:
+        held={m['id']:m['family'] for m in models if m['split']=='holdout'}
+        dev={m['id']:m['family'] for m in models if m['split']=='development'}
+        for visibility in ['whitebox','blackbox']:
+            for target in targets[visibility]:
+                refs=cfg['_references'][target['id']]
+                panel=set(held)&set(refs)
+                if len(panel)<cfg['domain_protocol']['minimum_models'] or len({held[m] for m in panel})<cfg['domain_protocol']['minimum_families']:
+                    raise ValueError('Insufficient frozen holdout reference coverage for '+target['id'])
+                if visibility=='whitebox':
+                    panel=set(dev)&set(refs)
+                    if len(panel)<3 or len({dev[m] for m in panel})<2:
+                        raise ValueError('Insufficient visible development reference coverage for '+target['id'])
     cfg['_config_path']=str(path);cfg['_config_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
     return cfg
 

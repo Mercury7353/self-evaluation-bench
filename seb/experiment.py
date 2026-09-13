@@ -18,6 +18,7 @@ from .gateway import reservation
 from .ledger import Ledger
 from .runner import digest_tree
 from .scoring import score_panel
+from .domain_scoring import score_domain
 from .supervisor import start_gateway, stop_gateway, run_jobs, freeze_program, check_designer_exit
 
 
@@ -83,6 +84,34 @@ selection; hidden acceptance results are returned only to the operator after fre
 '''
 
 
+DOMAIN_TASK = """You are researching an inexpensive evaluation for the assigned capability domain.
+Use the two visible target definitions and development resources in whitebox.json/resources.
+Choose your own method: original-task selection, cheap-item selection, synthesis, rewriting,
+mixed or adaptive measurement. You have one continuous research run; iteration is your choice.
+Use the SDK to test on development candidates and inspect evidence within the stated budget.
+Submit an executable measurement with a visible-target predictor and a fixed aggregate domain score.
+The domain score (higher means better) is evaluated against additional undisclosed targets with
+NO target-specific fitting. Independent acceptance uses held-out candidates, including new model
+families and other configurations of known families. Do not look up candidate identities/scores.
+Measure the final submission on development candidates before your deadline so its visible
+predictor can use the final-snapshot development observations. Freeze all code and assets.
+"""
+
+DOMAIN_CONTRACT = """
+# Domain protocol v1
+
+One independent research run; do not wait for controller-managed research rounds.
+The final held-out panel is separate from development. `predictor.py` is REQUIRED:
+its frozen fit/predict code receives ONLY visible-target development labels, plus anonymous
+item measurements. It never receives sealed target metadata/labels or held-out target labels.
+Its fitted mapping may be precomputed in predictor_assets/ during research.
+The frozen evaluation.json aggregation supplies z_domain; exactly that same score is used
+for every sealed target in this domain. There is no label-based sign change or hidden refit.
+Final acceptance returns separate visible and sealed utility. Missing outputs, constant
+predictions, reference coverage, costs and infrastructure status are recorded distinctly.
+"""
+
+
 def metadata(cfg, visibility):
     return {t['id']:{'scale':t['scale'],'status':'primary_archival'} for t in cfg['benchmarks'][visibility]}
 
@@ -123,7 +152,7 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
             tokens['development']:{'wallet':'development','cap':budget['development_usd'],'models':development,
                 'workspace':str(out/'researcher-work'),'research':True,'deadline_epoch':time.time()+cfg['design']['seconds']},
             tokens['evaluation']:{'wallet':'evaluation','cap':budget['evaluation_usd'],
-                'models':[m['id'] for m in cfg['models']],'workspace':str(out/'acceptance-input'),'allow_suite':True,'start_deadline_on_first_suite':cfg['evaluation']['seconds']}}}
+                'models':[m['id'] for m in cfg['models'] if not cfg.get('domain_protocol') or m['split']=='holdout'],'workspace':str(out/'acceptance-input'),'allow_suite':True,'start_deadline_on_first_suite':cfg['evaluation']['seconds']}}}
     if budget.get('judge_usd'):
         config['tokens'][secrets.token_hex(32)]={'wallet':'judge','cap':budget['judge_usd'],'models':[]}
     if cfg['evaluation']['preflight']:
@@ -138,7 +167,11 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
 def prepare_workspace(cfg, config, tokens, out):
     work=out/'researcher-work';work.mkdir()
     write(work/'whitebox.json',researcher_view(cfg))
-    (work/'CONTRACT.md').write_text(CONTRACT)
+    contract=CONTRACT
+    if cfg.get('domain_protocol'):
+        contract=CONTRACT.split('The platform reports raw-score correlations')[0]
+        contract=contract.replace('Optional `predictor.py` contract:', 'Required `predictor.py` contract:')+DOMAIN_CONTRACT
+    (work/'CONTRACT.md').write_text(contract)
     shutil.copy2(Path(__file__).with_name('research_sdk.py'),work/'research_sdk.py')
     for target in cfg['benchmarks']['whitebox']:
         for index,resource in enumerate(target['resources']):
@@ -258,7 +291,7 @@ def run(config_path, researcher_id, output, *, mock=False):
                     update(phase='designing',round=index+1)
                     if mock:mock_submission(work)
                     else:
-                        prompt=TASK+f'\nEach checkpoint is limited to {cfg["design"]["checkpoint_seconds"]} seconds.\nThis is round {index+1}/{cfg["design"]["rounds"]}. Remaining design time: {remaining} seconds.\n'
+                        prompt=(DOMAIN_TASK if cfg.get('domain_protocol') else TASK)+f'\nEach checkpoint is limited to {cfg["design"]["checkpoint_seconds"]} seconds.\nThis is round {index+1}/{cfg["design"]["rounds"]}. Remaining design time: {remaining} seconds.\n'
                         if researcher.get('prompt_file'):prompt+='\nOperator task instructions:\n'+Path(researcher['prompt_file']).read_text()
                         if feedback_file:prompt+='\nReview the previous white-box feedback at '+feedback_file+' and revise if useful.\n'
                         trace=out/f'researcher-trace-{index+1}'
@@ -291,31 +324,47 @@ def run(config_path, researcher_id, output, *, mock=False):
                 freeze_program(source,acceptance/'suite')
                 write(out/'freeze.json',{'selected_round':checkpoints[-1]['round'],'policy':'last_valid_round',
                     'files':digest_tree(acceptance/'suite'),'frozen_at':time.time(),
-                    'predictor':'submitted' if (source/'predictor.py').is_file() else 'fixed_ridge_baseline'})
+                    'predictor':'submitted' if (source/'predictor.py').is_file() else ('missing_required_predictor' if cfg.get('domain_protocol') else 'fixed_ridge_baseline')})
                 # Revoke researcher access before measuring the hidden panel.
                 (work/'access.json').unlink(missing_ok=True)
                 update(phase='acceptance')
-                results=run_jobs(config,tokens['evaluation'],[m['id'] for m in cfg['models']],'suite',
+                acceptance_models=[m for m in cfg['models'] if not cfg.get('domain_protocol') or m['split']=='holdout']
+                results=run_jobs(config,tokens['evaluation'],[m['id'] for m in acceptance_models],'suite',
                     out/'acceptance-jobs',time.time()+cfg['evaluation']['seconds'])
                 update(phase='scoring')
-                reports={}
-                for visibility in ['whitebox','blackbox']:
-                    targets=metadata(cfg,visibility)
-                    reports[visibility]=score_panel(config,acceptance/'suite',results,cfg['models'],
-                        {t:cfg['_references'][t] for t in targets},targets,out/visibility,overall=cfg['overall'])
+                if cfg.get('domain_protocol'):
+                    report=score_domain(config,acceptance/'suite',
+                        json.loads((out/'development-1/results.json').read_text()),results,cfg['models'],
+                        cfg['_references'],metadata(cfg,'whitebox'),metadata(cfg,'blackbox'),out/'domain',
+                        minimum_models=cfg['domain_protocol']['minimum_models'],
+                        minimum_families=cfg['domain_protocol']['minimum_families'])
+                    reports={'domain':report}
+                else:
+                    reports={}
+                    for visibility in ['whitebox','blackbox']:
+                        targets=metadata(cfg,visibility)
+                        reports[visibility]=score_panel(config,acceptance/'suite',results,cfg['models'],
+                            {t:cfg['_references'][t] for t in targets},targets,out/visibility,overall=cfg['overall'])
                 bill=accounting(out,cfg)
-                overall=reports['blackbox']['overall']
+                overall=({'metric':'visible_utility','score':reports['domain']['visible_utility'],
+                    'sealed_utility':reports['domain']['sealed_utility'],'source':'domain_protocol_v1'}
+                    if cfg.get('domain_protocol') else reports['blackbox']['overall'])
                 complete=all(r.get('score_status')=='valid' for r in results)
                 result={'researcher':researcher['id'],'overall':overall,'complete_models':sum(r.get('score_status')=='valid' for r in results),
-                    'expected_models':len(cfg['models']),'accounting':bill,'mock':mock,
+                    'expected_models':len(acceptance_models),'accounting':bill,'mock':mock,
                     'eligible':bool(complete and overall['score'] is not None and bill['within_budget'] and bill['unknown_calls']==0),
                     'predictor':json.loads((out/'freeze.json').read_text())['predictor'],
-                    'note':'Black-box family CV fits target-specific labels after freezing; it is not zero-shot target prediction.',
+                    'note':('Held-out candidates only; sealed targets use the frozen suite aggregate without target-label fitting.'
+                        if cfg.get('domain_protocol') else 'Black-box family CV fits target-specific labels after freezing; it is not zero-shot target prediction.'),
                     **({'paid_api_calls':0,'quality_claim':'none; simulated pipeline fixture'} if mock else {})}
             finally:stop_gateway(process);process=None
             # Reconcile after gateway shutdown so interrupted calls keep their final reservations.
             result['accounting']=accounting(out,cfg)
             result['eligible']=bool(complete and overall['score'] is not None and result['accounting']['within_budget'] and result['accounting']['unknown_calls']==0)
+            if cfg.get('domain_protocol'):
+                result['visible_utility']=reports['domain']['visible_utility']
+                result['sealed_utility']=reports['domain']['sealed_utility']
+                result['eligible']=result['eligible'] and result['sealed_utility'] is not None
             write(out/'result.json',result)
             update(phase='completed' if result['eligible'] else 'incomplete',finished=time.time())
     except BaseException as error:

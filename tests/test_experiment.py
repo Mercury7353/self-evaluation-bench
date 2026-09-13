@@ -117,3 +117,65 @@ def test_wallet_closed_by_overshoot_is_not_budget_success(tmp_path):
          'models':[{'id':'candidate','price':{'input':1,'output':1}}],'researchers':[]}
     result=accounting(tmp_path,cfg)
     assert result['within_budget'] is False and result['closed_wallets']==['evaluation']
+
+
+def test_domain_protocol_accepts_known_families_but_rejects_multiple_runs(tmp_path):
+    path,cfg=fixture_config(tmp_path)
+    cfg['domain_protocol']={'version':1,'minimum_models':3,'minimum_families':2}
+    cfg['design']['rounds']=1
+    cfg['models'][3]['family']=cfg['models'][0]['family']
+    for visibility in ['whitebox','blackbox']:
+        cfg['benchmarks'][visibility].append(dict(cfg['benchmarks'][visibility][0],id=visibility+'-second'))
+    path.write_text(yaml.safe_dump(cfg))
+    loaded=load(path)
+    assert loaded['models'][3]['family']==loaded['models'][0]['family']
+    cfg['design']['rounds']=2;path.write_text(yaml.safe_dump(cfg))
+    with pytest.raises(ValueError,match='one independent'):load(path)
+
+
+def test_domain_offline_pipeline_only_accepts_holdout_and_never_fits_sealed(tmp_path,monkeypatch):
+    root=os.environ.get('SEB_TEST_ROOT');science=os.environ.get('SEB_TEST_SCIENCE')
+    if not root or not science:pytest.skip('Set sandbox paths for integration')
+    import seb.experiment as experiment
+    path,cfg=fixture_config(tmp_path)
+    cfg['runtime']={'rootfs':root,'science_packages':science}
+    cfg['domain_protocol']={'version':1,'minimum_models':3,'minimum_families':2}
+    cfg['design']['rounds']=1
+    cfg['models'][3]['family']=cfg['models'][0]['family']
+    for visibility in ['whitebox','blackbox']:
+        cfg['benchmarks'][visibility].append(dict(cfg['benchmarks'][visibility][0],id=visibility+'-second'))
+    original=experiment.mock_submission
+    def submission(work):
+        original(work)
+        (work/'submission/predictor.py').write_text('''
+def fit(training_rows,target_metadata):
+    assert set(target_metadata)=={'visible-target','whitebox-second'}
+    assert all(set(row['targets'])==set(target_metadata) for row in training_rows)
+    return list(target_metadata)
+def predict(fitted,observations):
+    return {t:sum(observations.values())/len(observations) for t in fitted}
+''')
+    monkeypatch.setattr(experiment,'mock_submission',submission)
+    path.write_text(yaml.safe_dump(cfg));out=tmp_path/'domain-run'
+    result=experiment.run(path,None,out,mock=True)
+    assert result['eligible'] and result['expected_models']==3
+    assert result['overall']['source']=='domain_protocol_v1'
+    assert 'sealed_utility' in result and 'visible_utility' in result
+    accepted=json.loads((out/'acceptance-jobs/results.json').read_text())
+    assert {r['model'] for r in accepted}=={m['id'] for m in cfg['models'] if m['split']=='holdout'}
+    payload=(out/'domain/visible-prediction/input.json').read_text()
+    assert 'hidden-target' not in payload and 'blackbox-second' not in payload
+    assert not (out/'blackbox/family-cv').exists()
+    assert not (out/'domain/sealed-predictor').exists()
+
+
+def test_domain_missing_reference_blocks_before_provider_access(tmp_path):
+    path,cfg=fixture_config(tmp_path)
+    cfg['domain_protocol']={'version':1,'minimum_models':3,'minimum_families':2}
+    cfg['design']['rounds']=1
+    for visibility in ['whitebox','blackbox']:
+        cfg['benchmarks'][visibility].append(dict(cfg['benchmarks'][visibility][0],id=visibility+'-second'))
+    incomplete=tmp_path/'incomplete.json';incomplete.write_text('{"dev-a":1,"dev-b":0,"dev-c":0.5,"holdout-a":1}')
+    cfg['benchmarks']['blackbox'][0]['reference']=str(incomplete)
+    path.write_text(yaml.safe_dump(cfg))
+    with pytest.raises(ValueError,match='Insufficient frozen holdout reference'):load(path)
