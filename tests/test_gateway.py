@@ -89,6 +89,12 @@ def test_extra_paid_features_are_not_silently_unbudgeted():
         with pytest.raises(ValueError):reservation({'max_tokens':100,**extra},price)
 
 
+def test_provider_route_overrides_have_no_single_model_reservation():
+    for extra in ({'models':['other']}, {'fallbacks':'default'}, {'fallbacks':[{'model':'other'}]}):
+        with pytest.raises(ValueError, match='frozen model route'):
+            reservation({'model':'allowed','max_tokens':100,**extra},{'input':1,'output':1})
+
+
 def test_researcher_alias_routes_to_provider_model(tmp_path):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from threading import Thread

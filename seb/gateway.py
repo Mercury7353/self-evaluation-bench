@@ -70,7 +70,17 @@ def cost(usage, price):
             o * price['output'] * (long.get('output_multiplier', 1) if expensive else 1)) / 1_000_000
 
 
+def validate_model_route(body):
+    # Provider routing options may override `model` and its allowlist/price.
+    # These require a separately specified system and accounting contract.
+    if not isinstance(body, dict):
+        raise ValueError('Request body must be an object')
+    if any(field in body for field in ('models', 'fallbacks')):
+        raise ValueError('Provider model lists and fallbacks are outside the frozen model route')
+
+
 def reservation(body, price):
+    validate_model_route(body)
     # Deliberately conservative UTF-8 byte bound + envelope; no multimodal input
     # is admitted under this text-only MVP accounting contract.
     def inspect(x):
@@ -156,6 +166,7 @@ def create_app(config):
         raw_request = await request.body()
         try:
             body = json.loads(raw_request)
+            validate_model_route(body)
             model = body['model']
             if model not in entry['models'] or model not in config['prices']:
                 return JSONResponse({'error': 'Model not allowed for this wallet'}, 403)
@@ -166,9 +177,12 @@ def create_app(config):
             if policy_for(config, entry) and not counting:
                 output_limit(config, body.get('max_tokens', body.get('max_completion_tokens')), entry)
                 for field,value in config.get('frozen_request_parameters',{}).get(model,{}).items():
+                    if field == 'model':
+                        raise ValueError('Frozen request parameters cannot override the model route')
                     if field in body and body[field]!=value:
                         raise ValueError('Request conflicts with frozen parameter: '+field)
                     body[field]=value
+                validate_model_route(body)
             amount = 0 if counting else reservation(body, price)
         except (ValueError, KeyError, TypeError) as e:
             return JSONResponse({'error': str(e)}, 400)

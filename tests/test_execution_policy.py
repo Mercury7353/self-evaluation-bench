@@ -119,6 +119,41 @@ def test_output_floor_rejected_before_api_or_charge(provider):
     assert Ledger(config['artifacts']+'/ledger.sqlite').status()[0]['calls']==0
 
 
+@pytest.mark.parametrize('policy_enabled', [True, False])
+@pytest.mark.parametrize('path', ['/anthropic/v1/messages',
+                                 '/anthropic/v1/messages/count_tokens',
+                                 '/v1/openai/chat/completions'])
+def test_provider_routes_cannot_override_candidate_or_budget(provider, policy_enabled, path):
+    server, config = provider
+    if not policy_enabled:
+        config.pop('evaluation_policy')
+    body = {'model':'c01', 'max_tokens':32768, 'messages':[]}
+    with TestClient(create_app(config)) as client:
+        for extra in ({'models':['unlisted-expensive-model']},
+                      {'models':['c01','unlisted-expensive-model']},
+                      {'fallbacks':[{'model':'unlisted-expensive-model'}]},
+                      {'fallbacks':'default'}, {'models':None}):
+            result = client.post(path, json=body | extra, headers={'x-api-key':'token'})
+            assert result.status_code == 400
+            assert 'frozen model route' in result.json()['error']
+    assert server.bodies == []
+    assert Ledger(config['artifacts']+'/ledger.sqlite').status()[0]['calls'] == 0
+
+
+@pytest.mark.parametrize('parameters', [
+    {'model':'different-candidate'}, {'models':['unlisted-expensive-model']},
+    {'fallbacks':'default'},
+])
+def test_frozen_parameters_cannot_inject_a_different_route(provider, parameters):
+    server, config = provider
+    config['frozen_request_parameters']={'c01':parameters}
+    with TestClient(create_app(config)) as client:
+        result=post(client)
+        assert result.status_code == 400
+    assert server.bodies == []
+    assert Ledger(config['artifacts']+'/ledger.sqlite').status()[0]['calls'] == 0
+
+
 def test_retry_stops_at_original_budget(provider):
     server,config=provider
     config['tokens']['token']['cap']=.05
