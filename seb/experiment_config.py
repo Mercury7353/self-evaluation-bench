@@ -39,6 +39,8 @@ def load(path, *, resolve_inputs=True):
     if not runtime.get('rootfs'):raise ValueError('runtime.rootfs required')
     runtime['rootfs']=local(runtime['rootfs'])
     runtime['science_packages']=local(runtime.get('science_packages',sysconfig.get_path('purelib')))
+    if runtime.get('image_cache'):runtime['image_cache']=local(runtime['image_cache'])
+    if type(runtime.get('verifier_network',False)) is not bool:raise ValueError('runtime.verifier_network must be boolean')
     if runtime.get('codex_binary'):
         runtime['codex_binary']=local(runtime['codex_binary'])
     if resolve_inputs:
@@ -59,6 +61,14 @@ def load(path, *, resolve_inputs=True):
         for item in group:
             if not isinstance(item,dict):raise ValueError(label+' must be a mapping')
             ids.append(identifier(item.get('id'),label+' id'))
+            if item.get('availability','ready') not in ('ready','pending'):
+                raise ValueError('Invalid model availability')
+            if item.get('availability')=='pending':
+                if label!='model' or item.get('split')!='holdout' or not cfg.get('domain_protocol'):
+                    raise ValueError('Only declared domain holdout candidates may be pending')
+                if not isinstance(item.get('pending_reason'),str) or not item['pending_reason'].strip():
+                    raise ValueError('Pending candidate requires pending_reason')
+                continue
             if item.get('provider') not in providers:raise ValueError('Unknown provider for '+item['id'])
             if not item.get('model'):raise ValueError('Provider model name required')
             if providers[item['provider']].get('wire_api') in ('openai_responses','chat_completions'):
@@ -87,7 +97,7 @@ def load(path, *, resolve_inputs=True):
             raise ValueError('Auxiliary roles must be a nonempty unique list of grader/simulator')
         if 'split' in helper or 'family' in helper or 'harness' in helper:
             raise ValueError('Auxiliary models are not candidate or researcher panel members')
-        if helper['model'] in {m['model'] for m in models if m.get('split')=='holdout'}:
+        if helper['model'] in {m.get('model') for m in models if m.get('split')=='holdout'}:
             raise ValueError('Auxiliary model cannot expose a held-out candidate backend')
     if len({m['family'] for m in models if m['split']=='development'})<2:raise ValueError('At least two development model families required')
     if not cfg.get('domain_protocol') and {m['family'] for m in models if m['split']=='development'} & {m['family'] for m in models if m['split']=='holdout'}:raise ValueError('Holdout families must be disjoint from development families')

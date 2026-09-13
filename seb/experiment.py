@@ -174,7 +174,7 @@ No new development calls are submitted after the research deadline; existing mat
 
 
 def metadata(cfg, visibility):
-    return {t['id']:{'scale':t['scale'],'status':'primary_archival',
+    return {t['id']:{'scale':t['scale'],'status':t.get('reference_status','primary_archival'),
         **({'domain':t['domain']} if 'domain' in t else {})} for t in cfg['benchmarks'][visibility]}
 
 
@@ -189,7 +189,8 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
     from .experiment_config import auxiliary_view
     auxiliary=cfg.get('auxiliary_models',[])
     helper_ids=[m['id'] for m in auxiliary]
-    all_models=([researcher] if researcher else [])+cfg['models']+auxiliary
+    available=[m for m in cfg['models'] if m.get('availability')!='pending']
+    all_models=([researcher] if researcher else [])+available+auxiliary
     used={m['provider'] for m in all_models}
     secretfiles={}
     for pid in sorted(used):
@@ -204,7 +205,8 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
     budget=cfg['budgets']
     config={'artifacts':str(out/'gateway'),'run_root':str(out),'gateway_socket':str(socket),
         'base_root':cfg['runtime']['rootfs'],'science_packages':cfg['runtime']['science_packages'],
-        'image_cache':str(out/'image-cache'),'key_file':secretfiles[first_provider],
+        'image_cache':cfg['runtime'].get('image_cache',str(out/'image-cache')),
+        'verifier_network':cfg['runtime'].get('verifier_network',False),'key_file':secretfiles[first_provider],
         'upstream':mock_url or first['upstream'],
         'prices':{m['id']:m['price'] for m in all_models},
         'model_backends':{m['id']:{'model':m['model'],'key_file':secretfiles[m['provider']],
@@ -229,7 +231,7 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
                 'models':development+helper_ids,'candidate_models':development,
                 'workspace':str(out/'researcher-work'),'research':True,'deadline_epoch':time.time()+cfg['design']['seconds']},
             tokens['evaluation']:{'wallet':'evaluation','cap':budget['evaluation_usd'],
-                'models':[m['id'] for m in cfg['models'] if not cfg.get('domain_protocol') or m['split']=='holdout'],'workspace':str(out/'acceptance-input'),'allow_suite':True,'start_deadline_on_first_suite':cfg['evaluation']['seconds']}}}
+                'models':[m['id'] for m in available if not cfg.get('domain_protocol') or m['split']=='holdout'],'workspace':str(out/'acceptance-input'),'allow_suite':True,'start_deadline_on_first_suite':cfg['evaluation']['seconds']}}}
     if researcher:
         config['tokens'][tokens['designer']]={'wallet':'designer','cap':budget['researcher_usd'],
             'models':[researcher['id']],'deadline_epoch':config['research_deadline_epoch']}
@@ -246,8 +248,8 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
     if cfg['evaluation']['preflight']:
         tokens['preflight']=secrets.token_hex(32)
         config['tokens'][tokens['preflight']]={'wallet':'development','cap':budget['development_usd'],
-            'models':[m['id'] for m in cfg['models']]+helper_ids,
-            'candidate_models':[m['id'] for m in cfg['models']],'research':True,'workspace':str(out/'readiness'),
+            'models':[m['id'] for m in available]+helper_ids,
+            'candidate_models':[m['id'] for m in available],'research':True,'workspace':str(out/'readiness'),
             'deadline_epoch':config['research_deadline_epoch']}
     for model in all_models:reservation({'max_tokens':cfg['evaluation']['policy']['default_output_tokens'],'messages':[]},model['price'])
     return config,tokens
@@ -321,7 +323,7 @@ def accounting(out, cfg):
     with ledger.connect() as db:
         rows=[dict(r) for r in db.execute('SELECT wallet, model, SUM(charged) AS metered_usd, SUM(CASE WHEN charged IS NULL THEN reserve ELSE 0 END) AS outstanding_reserved_usd, COUNT(*) AS calls FROM calls GROUP BY wallet,model')]
         unknown=db.execute('SELECT COUNT(*) FROM calls WHERE charged IS NULL').fetchone()[0]
-    prices={m['id']:m['price'] for m in cfg['models']+cfg['researchers']+cfg.get('auxiliary_models',[])}
+    prices={m['id']:m['price'] for m in cfg['models']+cfg['researchers']+cfg.get('auxiliary_models',[]) if m.get('availability')!='pending'}
     with ledger.connect() as db:
         for row in rows:
             calls=db.execute('SELECT c.id,c.usage,c.charged,r.call_id AS replay FROM calls c LEFT JOIN cache_replays r ON r.call_id=c.id WHERE wallet=? AND model=?',(row['wallet'],row['model'])).fetchall()
@@ -363,7 +365,7 @@ def run(config_path, researcher_id, output, *, mock=False):
     if (researcher['harness']=='mock')!=mock:raise ValueError('Mock harness requires --mock; --mock cannot substitute for a real researcher')
     if mock and cfg['design']['minimum_items']!=2:raise ValueError('The mock fixture requires minimum_items: 2')
     doctor(cfg['runtime']['rootfs'])
-    if not mock and any('REPLACE' in m['model'] or 'YOUR_' in cfg['providers'][m['provider']]['upstream'] for m in [researcher,*cfg['models'],*cfg.get('auxiliary_models',[])]):raise ValueError('Replace example model and provider placeholders before a paid run')
+    if not mock and any('REPLACE' in m['model'] or 'YOUR_' in cfg['providers'][m['provider']]['upstream'] for m in [researcher,*cfg['models'],*cfg.get('auxiliary_models',[])] if m.get('availability')!='pending'):raise ValueError('Replace example model and provider placeholders before a paid run')
     if not mock and researcher['harness']=='claude_code' and not shutil.which('claude'):
         raise ValueError('Install the native Claude Code executable for this harness')
     if researcher['harness']=='codex':
@@ -389,7 +391,7 @@ def run(config_path, researcher_id, output, *, mock=False):
                     update(phase='preflight')
                     readiness=out/'readiness';readiness.mkdir()
                     mock_submission(readiness)
-                    ready=run_jobs(config,tokens['preflight'],[m['id'] for m in cfg['models']],'submission',
+                    ready=run_jobs(config,tokens['preflight'],[m['id'] for m in cfg['models'] if m.get('availability')!='pending'],'submission',
                         out/'preflight-jobs',min(time.time()+3600,config['research_deadline_epoch']),pilot=True)
                     write(out/'preflight.json',{'models':len(ready),'transport_complete':all(r.get('score_status')=='valid' for r in ready),
                         'note':'Correctness is not a transport gate; completed empty/wrong answers are retained.'})
@@ -476,7 +478,8 @@ def run(config_path, researcher_id, output, *, mock=False):
                 (work/'access.json').unlink(missing_ok=True)
                 update(phase='acceptance')
                 acceptance_models=[m for m in cfg['models'] if not cfg.get('domain_protocol') or m['split']=='holdout']
-                results=run_jobs(config,tokens['evaluation'],[m['id'] for m in acceptance_models],'suite',
+                pending_models={m['id']:m['pending_reason'] for m in acceptance_models if m.get('availability')=='pending'}
+                results=run_jobs(config,tokens['evaluation'],[m['id'] for m in acceptance_models if m['id'] not in pending_models],'suite',
                     out/'acceptance-jobs',time.time()+cfg['evaluation']['seconds'])
                 update(phase='scoring')
                 if cfg.get('domain_protocol'):
@@ -498,10 +501,12 @@ def run(config_path, researcher_id, output, *, mock=False):
                     'sealed_utility':reports['domain']['sealed_utility'],
                     'source':'joint_protocol_v2' if joint_domains(cfg) else 'domain_protocol_v1'}
                     if cfg.get('domain_protocol') else reports['blackbox']['overall'])
-                complete=all(r.get('score_status')=='valid' for r in results)
+                available_complete=len(results)==len(acceptance_models)-len(pending_models) and all(r.get('score_status')=='valid' for r in results)
+                complete=available_complete and not pending_models
                 result={'researcher':researcher['id'],'overall':overall,'complete_models':sum(r.get('score_status')=='valid' for r in results),
                     'research_outcome':research_outcome,
                     'expected_models':len(acceptance_models),'accounting':bill,'mock':mock,
+                    'pending_provider_models':pending_models,'available_measurement_complete':available_complete,
                     'eligible':bool(complete and overall['score'] is not None and bill['within_budget'] and bill['unknown_calls']==0),
                     'predictor':json.loads((out/'freeze.json').read_text())['predictor'],
                     'note':('One shared measurement per held-out candidate; each domain score is reused for both sealed targets without fitting.' if joint_domains(cfg) else 'Held-out candidates only; sealed targets use the frozen suite aggregate without target-label fitting.'
@@ -523,6 +528,8 @@ def run(config_path, researcher_id, output, *, mock=False):
                             for report in reports['domain']['domains'].values()))
             write(out/'result.json',result)
             update(phase='completed' if result['eligible'] else
+                'pending_provider' if pending_models and available_complete and not result.get('has_submission_failure') and
+                result['accounting']['within_budget'] and result['accounting']['unknown_calls']==0 else
                 'pending_reference' if result.get('reference_status')=='pending' and not result['has_submission_failure'] and complete and
                 result['accounting']['within_budget'] and result['accounting']['unknown_calls']==0 else 'incomplete',finished=time.time())
     except BaseException as error:

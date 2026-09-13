@@ -72,7 +72,7 @@ def run(config_path, submission, output, *, name='fixed', mock=False,
         raise ValueError('Unknown fixed baseline kind')
     if cfg['evaluation']['preflight']:
         raise ValueError('Run transport calibration separately; a fixed baseline does not repeat it')
-    if not mock and any('REPLACE' in m['model'] or 'YOUR_' in cfg['providers'][m['provider']]['upstream'] for m in cfg['models']+cfg.get('auxiliary_models',[])):
+    if not mock and any('REPLACE' in m['model'] or 'YOUR_' in cfg['providers'][m['provider']]['upstream'] for m in cfg['models']+cfg.get('auxiliary_models',[]) if m.get('availability')!='pending'):
         raise ValueError('Replace candidate and provider placeholders before a paid baseline run')
     source=Path(submission).resolve()
     load_manifest(source,cfg['design']['minimum_items'],domains=joint_domains(cfg))
@@ -114,7 +114,8 @@ def run(config_path, submission, output, *, name='fixed', mock=False,
             (work/'access.json').unlink(missing_ok=True)
             update(phase='acceptance')
             heldout=[m for m in cfg['models'] if m['split']=='holdout']
-            accepted=run_jobs(config,tokens['evaluation'],[m['id'] for m in heldout],
+            pending_models={m['id']:m['pending_reason'] for m in heldout if m.get('availability')=='pending'}
+            accepted=run_jobs(config,tokens['evaluation'],[m['id'] for m in heldout if m['id'] not in pending_models],
                 'suite',out/'acceptance-jobs',time.time()+cfg['evaluation']['seconds'])
             # Settle completed calls and retain pending/unknown charges before scoring.
             stop_gateway(process);process=None
@@ -130,6 +131,8 @@ def run(config_path, submission, output, *, name='fixed', mock=False,
                 'research_unit':'joint' if joint_domains(cfg) else 'domain',
                 'visible_utility':report['visible_utility'],'sealed_utility':report['sealed_utility'],
                 'complete_models':complete,'expected_models':len(heldout),'accounting':bill,
+                'pending_provider_models':pending_models,
+                'available_measurement_complete':complete==len(heldout)-len(pending_models),
                 'measurement_complete':complete==len(heldout),**reference_status(report),
                 'eligible':complete==len(heldout) and report['visible_utility'] is not None and
                     report['sealed_utility'] is not None and bill['within_budget'] and bill['unknown_calls']==0,
@@ -137,6 +140,8 @@ def run(config_path, submission, output, *, name='fixed', mock=False,
             if joint_domains(cfg):result['domains']=report['domains']
             write(out/'result.json',result)
             update(phase='completed' if result['eligible'] else
+                'pending_provider' if pending_models and result['available_measurement_complete'] and not result['has_submission_failure'] and
+                bill['within_budget'] and bill['unknown_calls']==0 else
                 'pending_reference' if result['reference_status']=='pending' and not result['has_submission_failure'] and complete==len(heldout) and
                 bill['within_budget'] and bill['unknown_calls']==0 else 'incomplete',finished=time.time())
             return result

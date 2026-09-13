@@ -59,11 +59,15 @@ def execute_task(task_dir, model, token, config, run_dir, *, oracle=False, effor
     try:
         root=run_dir/'rootfs'
         built=build_task(snapshot/'environment',root,config['image_cache'],run_dir/'build')
+        result['environment']=built
+        task_env={**built['env'],**task.config.environment.env}
         work=root/'workspace';work.mkdir(exist_ok=True)
-        agent_timeout=min(float(task.config.agent.timeout_sec),config.get('task_timeout',600))
+        agent_timeout=min(float(task.config.agent.timeout_sec),config.get('task_timeout',float('inf')))
+        verifier_timeout=min(float(task.config.verifier.timeout_sec),config.get('verifier_timeout',float('inf')))
+        result.update(agent_timeout_seconds=agent_timeout,verifier_timeout_seconds=verifier_timeout)
         if oracle:
             shutil.copytree(snapshot/'solution',root/'solution',dirs_exist_ok=True)
-            result['agent_exit']=run_logged(contained(root,['/bin/bash','/solution/solve.sh'],cwd=built['cwd'],env=built['env']),run_dir/'oracle',timeout=agent_timeout)
+            result['agent_exit']=run_logged(contained(root,['/bin/bash','/solution/solve.sh'],cwd=built['cwd'],env={**task_env,**task.config.solution.env}),run_dir/'oracle',timeout=agent_timeout)
         else:
             # The task environment is /; /workspace is the Claude home and cwd.
             # Explicitly state the Dockerfile WORKDIR so task semantics are retained.
@@ -72,7 +76,7 @@ def execute_task(task_dir, model, token, config, run_dir, *, oracle=False, effor
             from .execution_policy import output_limit,policy_for
             limit=output_limit(config,config.get('candidate_output_tokens'))
             result['candidate_output_tokens']=limit
-            env=dict(built['env'])
+            env=dict(task_env)
             if policy_for(config):env.update(CLAUDE_CODE_MAX_RETRIES='0',API_TIMEOUT_MS='4200000')
             result['agent_exit']=launch_claude(root,work,run_dir/'agent',config['gateway_socket'],token,model,instruction,timeout=agent_timeout,effort=effort,extra_env=env,research_network=result['agent_network'],output_tokens=limit)
         # Verifier code is introduced only after the candidate has finished.
@@ -80,8 +84,8 @@ def execute_task(task_dir, model, token, config, run_dir, *, oracle=False, effor
         if tests.exists():shutil.rmtree(tests)
         shutil.copytree(snapshot/'tests',tests)
         verifier_logs=run_dir/'verifier';verifier_logs.mkdir(exist_ok=True)
-        rc=run_logged(contained(root,['/bin/bash','/tests/test.sh'],cwd=built['cwd'],env=built['env'],network=config.get('verifier_network',False),
-                     binds=[(verifier_logs,'/logs/verifier',False)]),run_dir/'verify',timeout=min(task.config.verifier.timeout_sec,600))
+        rc=run_logged(contained(root,['/bin/bash','/tests/test.sh'],cwd=built['cwd'],env={**task_env,**task.config.verifier.env},network=config.get('verifier_network',False),
+                     binds=[(verifier_logs,'/logs/verifier',False)]),run_dir/'verify',timeout=verifier_timeout)
         result['verifier_exit']=rc
         rewards=verifier_logs/'reward.json'
         txt=verifier_logs/'reward.txt'

@@ -19,7 +19,7 @@ def finite(value):
     return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
 
 
-def component(predictions, references, expected, families, *, minimum_models, minimum_families, panel=None):
+def component(predictions, references, expected, families, *, minimum_models, minimum_families, panel=None, pending_models=None):
     ids = [m for m in expected if m in references] if panel is None else list(panel)
     if len(ids)!=len(set(ids)) or any(m not in expected for m in ids):
         raise ValueError('Reference panel must contain unique expected held-out models')
@@ -39,8 +39,14 @@ def component(predictions, references, expected, families, *, minimum_models, mi
     valid = [m for m in ids if finite(predictions.get(m))]
     base['n_predicted'] = len(valid)
     if len(valid) != len(ids):
+        absent=[m for m in ids if m not in valid]
+        pending=[m for m in absent if m in (pending_models or {})]
+        if len(pending)==len(absent):
+            return base | {'status':'PENDING_PROVIDER','utility':None,'spearman':None,
+                           'pending_provider_models':{m:pending_models[m] for m in pending}}
         return base | {'status': 'FAIL', 'utility': -1., 'spearman': None,
-                       'missing_models': [m for m in ids if m not in valid]}
+                       'missing_models': [m for m in absent if m not in pending],
+                       'pending_provider_models':{m:pending_models[m] for m in pending}}
     x = [predictions[m] for m in ids]
     if len(set(x)) < 2:
         return base | {'status': 'CONST', 'utility': 0., 'spearman': None, 'pearson': None}
@@ -53,6 +59,7 @@ def summarize_outputs(models, references, visible_ids, sealed_ids, predictions, 
     held = [m for m in models if m['split'] == 'holdout']
     ids = [m['id'] for m in held]
     families = {m['id']: m['family'] for m in held}
+    pending_models={m['id']:m['pending_reason'] for m in held if m.get('availability')=='pending'}
     if set(visible_ids) & set(sealed_ids):
         raise ValueError('Visible and sealed targets overlap')
     report = {'acceptance_models': ids, 'visible': {}, 'sealed': {}, 'fit_uses_sealed_labels': False}
@@ -62,7 +69,7 @@ def summarize_outputs(models, references, visible_ids, sealed_ids, predictions, 
                       if visibility == 'visible' else domain_scores)
             report[visibility][target] = component(values, references.get(target, {}), ids, families,
                 minimum_models=minimum_models, minimum_families=minimum_families,
-                panel=reference_panels[target] if reference_panels is not None else None)
+                panel=reference_panels[target] if reference_panels is not None else None,pending_models=pending_models)
         components = [r['utility'] for r in report[visibility].values()]
         report[visibility + '_utility'] = statistics.mean(components) if components and all(x is not None for x in components) else None
     return report

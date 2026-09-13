@@ -104,6 +104,59 @@ def test_development_and_evaluation_use_same_effort_and_env(tmp_path,monkeypatch
     assert captured['extra_env']=={'TASK_FLAG':'yes'}
 
 
+def test_task_uses_source_timeouts_and_phase_environment(tmp_path,monkeypatch):
+    import seb.runner as runner
+    root=make_submission(tmp_path)
+    task=root/'tasks/arithmetic'
+    (task/'task.toml').write_text('''version = "1.0"
+[agent]
+timeout_sec = 900
+[verifier]
+timeout_sec = 1200
+[verifier.env]
+PHASE = "verify"
+[solution.env]
+PHASE = "solve"
+[environment.env]
+COMMON = "both"
+''')
+    def build(environment,destination,cache,logdir):
+        destination.mkdir();return {'cwd':'/app','env':{'IMAGE':'inherited'}}
+    captured=[]
+    def execute(args,log,**kwargs):
+        captured.append((args,kwargs['timeout']))
+        if str(log).endswith('verify'):(Path(log).parent/'verifier/reward.txt').write_text('1')
+        return 0
+    monkeypatch.setattr(runner,'build_task',build);monkeypatch.setattr(runner,'run_logged',execute)
+    result=runner.execute_task(task,'oracle','',{'image_cache':'unused'},tmp_path/'run',oracle=True)
+    assert result['status']=='ok' and [t for _,t in captured]==[900,1200]
+    assert all('both' in args and 'inherited' in args for args,_ in captured)
+    assert 'solve' in captured[0][0] and 'verify' in captured[1][0]
+
+
+def test_docker_arg_scope_inherited_path_and_same_line_env(tmp_path,monkeypatch):
+    import seb.container as container
+    base=tmp_path/'base';base.mkdir()
+    source=tmp_path/'environment';source.mkdir()
+    (source/'Dockerfile').write_text('''FROM fixture
+ARG BASE_SHA=abc123
+ENV PREVIOUS=old
+ENV PREVIOUS=new OTHER=$PREVIOUS PATH=/root/go/bin:${PATH}
+WORKDIR /app
+RUN test "$BASE_SHA" = abc123
+CMD ["/bin/bash"]
+''')
+    monkeypatch.setattr(container,'image_root',lambda *args:base)
+    monkeypatch.setattr(container,'image_environment',lambda *args:{'PATH':'/image/bin:/usr/bin'})
+    calls=[]
+    monkeypatch.setattr(container,'run_logged',lambda args,*a,**k:calls.append(args) or 0)
+    result=container.build_task(source,tmp_path/'root','cache',tmp_path/'logs')
+    assert result['env']['PATH']=='/root/go/bin:/image/bin:/usr/bin'
+    assert result['env']['OTHER']=='old' and result['env']['PREVIOUS']=='new'
+    assert 'BASE_SHA' not in result['env'] and 'abc123' in calls[0]
+    assert result['default_command']==['/bin/bash']
+
+
 @pytest.mark.parametrize('harness_error',[False,True])
 def test_vnext_wrong_answer_is_scored_but_harness_error_is_not(tmp_path,monkeypatch,harness_error):
     import seb.runner as runner
