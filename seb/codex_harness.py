@@ -22,6 +22,9 @@ def launch_codex(root, workspace, trace, gateway_socket, designer_token, model, 
                  *, timeout, effort, binary=None, resume_thread=None, extra_env=None, extra_binds=(), stop_requested=None):
     trace = Path(trace).resolve(); trace.mkdir(parents=True, exist_ok=True)
     workspace = Path(workspace).resolve()
+    # Keep async I/O pools within shared HPC thread quotas. This does not cap
+    # shell CPU affinity, model reasoning, or the candidate execution policy.
+    runtime_threads='4'
     (workspace/'.codex').mkdir(exist_ok=True)
     repo = Path(__file__).resolve().parent.parent
     harness,binary = runtime_files(binary)
@@ -32,7 +35,7 @@ def launch_codex(root, workspace, trace, gateway_socket, designer_token, model, 
         with path.open('rb') as stream:hashes[str(path)]=hashlib.file_digest(stream,'sha256').hexdigest()
     (trace/'runtime.json').write_text(json.dumps({'model':model,'effort':effort,
         'sdk_version':json.loads((harness/'node_modules/@openai/codex-sdk/package.json').read_text())['version'],
-        'files_sha256':hashes,'isolated_network':True},indent=2))
+        'files_sha256':hashes,'isolated_network':True,'tokio_worker_threads':int(runtime_threads)},indent=2))
     prompt_file = trace / 'prompt.txt'; prompt_file.write_text(prompt)
     wrapper = trace / 'codex-wrapper'
     wrapper.write_text(f'#!{sys.executable}\nimport sys\nsys.path.insert(0, {str(repo)!r})\nfrom seb.codex_wrapper import main\nmain()\n')
@@ -44,6 +47,7 @@ def launch_codex(root, workspace, trace, gateway_socket, designer_token, model, 
                   resumeThread=resume_thread, container_launch={
                       'enable_loopback': True, 'proxy_port': 18765, 'cwd': '/workspace',
                       'env': {**(extra_env or {}), 'HOME': '/workspace', 'CODEX_HOME': '/workspace/.codex',
+                              'TOKIO_WORKER_THREADS':runtime_threads,
                               'SEB_DESIGNER_TOKEN': designer_token,
                               'PYTHONPATH': (extra_env or {}).get('PYTHONPATH','/workspace'),
                               'SEB_GATEWAY_URL': 'http://127.0.0.1:18765'}})

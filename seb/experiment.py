@@ -357,7 +357,7 @@ def accounting(out, cfg):
             'note':'charged/metered_usd are equivalent quota including response replays. provider_metered_usd excludes replay charges; cache_adjusted_estimate_usd additionally applies provider prompt-cache pricing. Unknown reservations remain outstanding. None are invoices.'}
 
 
-def run(config_path, researcher_id, output, *, mock=False):
+def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=False):
     cfg=load(config_path)
     candidates=[r for r in cfg['researchers'] if r['id']==researcher_id] if researcher_id else cfg['researchers']
     if len(candidates)!=1:raise ValueError('Choose exactly one configured --researcher ID per output directory')
@@ -371,13 +371,21 @@ def run(config_path, researcher_id, output, *, mock=False):
     if researcher['harness']=='codex':
         from .codex_harness import runtime_files
         runtime_files(cfg['runtime'].get('codex_binary'))
-    out=Path(output).resolve();out.mkdir(parents=True,exist_ok=False);out.chmod(0o700)
+    out=Path(output).resolve();recovery=None
+    if resume_prelaunch:
+        from .prelaunch_recovery import archive_unstarted,restore_ledger
+        recovery=archive_unstarted(out,cfg,researcher['id'])
+    out.mkdir(parents=True,exist_ok=False);out.chmod(0o700)
     process=None;server=None;state={'phase':'preparing','started':time.time(),'researcher':researcher['id'],'mock':mock}
+    if recovery:
+        state.update(started=recovery['original_started'],prelaunch_recovery=recovery)
+        restore_ledger(recovery,out)
     def update(**values):state.update(values);write(out/'state.json',state)
     def interrupted(signum,frame):raise InterruptedError('Interrupted; existing ledgers and job IDs are preserved')
     prior=signal.signal(signal.SIGTERM,interrupted)
     try:
         frozen_cfg={k:v for k,v in cfg.items() if not k.startswith('_')}
+        update(phase='preparing')
         write(out/'config.resolved.json',frozen_cfg)
         write(out/'provenance.json',{'config_sha256':cfg['_config_sha256'],'reference_sha256':cfg['_reference_hashes'],
             'code_sha256':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(__file__).parent.iterdir() if p.suffix in ('.py','.c')},'started':state['started'],'mock':mock})
@@ -385,6 +393,10 @@ def run(config_path, researcher_id, output, *, mock=False):
         with tempfile.TemporaryDirectory(prefix='seb-experiment-') as sockets:
             config,tokens=build_gateway(cfg,researcher,out,Path(sockets)/'gateway.sock',
                 mock_url=f'http://127.0.0.1:{server.server_port}' if server else None)
+            if recovery:
+                config['research_deadline_epoch']=recovery['original_deadline_epoch']
+                for entry in config['tokens'].values():
+                    if 'deadline_epoch' in entry:entry['deadline_epoch']=recovery['original_deadline_epoch']
             process=start_gateway(config,out)
             try:
                 if cfg['evaluation']['preflight']:

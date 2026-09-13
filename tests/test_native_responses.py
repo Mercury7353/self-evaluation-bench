@@ -203,6 +203,7 @@ def test_actual_codex_sdk_tool_roundtrip_inside_isolated_namespace(tmp_path, ups
         if len(received) == 1:
             import shlex
             script = ('import json,os,socket,urllib.request; '
+                      "assert os.environ['TOKIO_WORKER_THREADS']=='4'; "
                       "assert json.load(urllib.request.urlopen(os.environ['SEB_GATEWAY_URL']+'/health'))['status']=='ok'; "
                       f'assert not os.path.exists({str(canary)!r}); '
                       f's=socket.socket();s.settimeout(1);assert s.connect_ex(("127.0.0.1",{server.server_port}))!=0; '
@@ -253,6 +254,7 @@ def test_actual_codex_sdk_tool_roundtrip_inside_isolated_namespace(tmp_path, ups
             assert first['reasoning']['effort'] == second['reasoning']['effort'] == effort
             runtime=json.loads((tmp_path/'trace/runtime.json').read_text())
             assert runtime['model']==model and runtime['effort']==effort and runtime['sdk_version']=='0.153.4'
+            assert runtime['tokio_worker_threads']==4
             assert len(runtime['files_sha256'])==5 and all(len(v)==64 for v in runtime['files_sha256'].values())
             wallet = app.state.ledger.status('designer')[0]
             assert wallet['calls'] == 2 and wallet['outstanding'] == 0
