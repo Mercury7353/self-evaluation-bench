@@ -112,9 +112,60 @@ Final acceptance returns separate visible and sealed utility. Missing outputs, c
 predictions, reference coverage, costs and infrastructure status are recorded distinctly.
 """
 
+JOINT_TASK = """You are researching one inexpensive evaluation across coding, co-work, and reasoning.
+All six visible target definitions and development resources are provided together in whitebox.json/resources.
+You have ONE continuous research run and ONE shared development budget. Allocate them yourself.
+You may select original tasks or cheap items, synthesize, rewrite, combine methods, or measure adaptively.
+Reuse tasks, tools, graders, and measurements across domains when useful. Domain grouping does not
+require separate runs or duplicate candidate calls. Only development candidates are accessible now.
+Submit one executable measurement, six visible-target predictions, and three frozen domain scores.
+Each held-out candidate runs the whole program once under the shared final cost cap. Each domain score
+(higher means better) is compared with undisclosed targets without target-specific fitting or sign changes.
+Measure your final submission on development candidates before the deadline; its predictor may use
+all six visible development labels and shared item observations. Freeze code, assets, and stopping rules.
+CONTRACT.md and the SDK provide executable interfaces; your research strategy and iteration are your choice.
+"""
+
+JOINT_CONTRACT = """
+# Joint protocol v2
+
+This is one research run across three domains. whitebox.json lists each domain and its visible targets.
+The development wallet and time limit are shared. Each final candidate has one whole-program cost cap;
+shared item or grader calls are counted once. Small development pilots may cover a subset of domains.
+
+predictor.py is required. Its fit/predict code receives all visible development labels and anonymous
+item observations, but no undisclosed target names/labels or held-out labels. Cross-domain features and
+predictor_assets/ are allowed. Return predictions keyed by the six visible target IDs.
+
+The final evaluation.json must declare domain_aggregations for exactly the three domain IDs in
+whitebox.json. Reuse the same declared item in multiple domains without issuing additional calls:
+"domain_aggregations": {
+  "coding": {"kind":"weighted_mean", "weights":{"example":1}},
+  "co-work": {"kind":"weighted_mean", "weights":{"example":1}},
+  "reasoning": {"kind":"weighted_mean", "weights":{"example":1}}
+}
+This is an interface example, not a recommended measurement design. The platform computes these
+weighted means from item results. For a custom rule, declare kind="custom", its input "items" list,
+and a textual "method"; implement the frozen rule in run.py and return its [0,1] value under
+"domain_scores": {domain_id: value}. Unresolved selected input items make that domain incomplete.
+Adaptive exclusion follows the existing frozen selection rule. Missing custom outputs are failures,
+not constant predictions. Each domain's two undisclosed targets use exactly its one frozen score.
+
+Final acceptance reports per-target results and separate visible/sealed utility, averaged equally
+across domains. It never trains a new predictor on undisclosed labels or treats domains as independent runs.
+"""
+
 
 def metadata(cfg, visibility):
-    return {t['id']:{'scale':t['scale'],'status':'primary_archival'} for t in cfg['benchmarks'][visibility]}
+    return {t['id']:{'scale':t['scale'],'status':'primary_archival',
+        **({'domain':t['domain']} if 'domain' in t else {})} for t in cfg['benchmarks'][visibility]}
+
+
+def joint_domains(cfg):
+    protocol=cfg.get('domain_protocol',{})
+    if protocol.get('version')!=2:return None
+    return {d:{v:[t['id'] for t in cfg['benchmarks'][key] if t['domain']==d]
+        for v,key in [('visible','whitebox'),('sealed','blackbox')]} for d in protocol['domains']}
 
 
 def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
@@ -146,6 +197,7 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
         'max_pending_suites':max(len(cfg['models'])*2,8),'reservation_wait_seconds':15,
         'research_deadline_epoch':time.time()+cfg['design']['seconds'],
         'overall':cfg['overall'],
+        **({'joint_domains':list(joint_domains(cfg))} if joint_domains(cfg) else {}),
         'whitebox':{'models':[m for m in cfg['models'] if m['split']=='development'],
             'references':{t:row['scores'] for t,row in researcher_view(cfg)['targets'].items()},
             'targets':metadata(cfg,'whitebox')},
@@ -175,7 +227,7 @@ def prepare_workspace(cfg, config, tokens, out):
     contract=CONTRACT
     if cfg.get('domain_protocol'):
         contract=CONTRACT.split('The platform reports raw-score correlations')[0]
-        contract=contract.replace('Optional `predictor.py` contract:', 'Required `predictor.py` contract:')+DOMAIN_CONTRACT
+        contract=contract.replace('Optional `predictor.py` contract:', 'Required `predictor.py` contract:')+(JOINT_CONTRACT if joint_domains(cfg) else DOMAIN_CONTRACT)
     (work/'CONTRACT.md').write_text(contract)
     shutil.copy2(Path(__file__).with_name('research_sdk.py'),work/'research_sdk.py')
     for target in cfg['benchmarks']['whitebox']:
@@ -300,7 +352,8 @@ def run(config_path, researcher_id, output, *, mock=False):
                     update(phase='designing',round=index+1)
                     if mock:mock_submission(work)
                     else:
-                        prompt=(DOMAIN_TASK if cfg.get('domain_protocol') else TASK)+f'\nEach checkpoint is limited to {cfg["design"]["checkpoint_seconds"]} seconds.\nThis is round {index+1}/{cfg["design"]["rounds"]}. Remaining design time: {remaining} seconds.\n'
+                        prompt=(JOINT_TASK if joint_domains(cfg) else DOMAIN_TASK if cfg.get('domain_protocol') else TASK)
+                        prompt+=f'\nRemaining total research time: {remaining} seconds.\n' if cfg.get('domain_protocol') else f'\nEach checkpoint is limited to {cfg["design"]["checkpoint_seconds"]} seconds.\nThis is round {index+1}/{cfg["design"]["rounds"]}. Remaining design time: {remaining} seconds.\n'
                         if researcher.get('prompt_file'):prompt+='\nOperator task instructions:\n'+Path(researcher['prompt_file']).read_text()
                         if feedback_file:prompt+='\nReview the previous white-box feedback at '+feedback_file+' and revise if useful.\n'
                         trace=out/f'researcher-trace-{index+1}'
@@ -317,7 +370,7 @@ def run(config_path, researcher_id, output, *, mock=False):
                             rc=launch_claude(root,work,trace,config['gateway_socket'],tokens['designer'],researcher['id'],prompt,
                                 resume_session=previous_session,**common)
                             check_designer_exit(trace,rc);previous_session=session_id(trace)
-                    source=work/'submission';load_manifest(source,cfg['design']['minimum_items'])
+                    source=work/'submission';load_manifest(source,cfg['design']['minimum_items'],domains=config.get('joint_domains'))
                     checkpoint=out/'checkpoints'/f'round-{index+1}';checkpoint.parent.mkdir(exist_ok=True)
                     freeze_program(source,checkpoint)
                     # Reuse exact-snapshot measurements, including complete wrong/empty answers.
@@ -354,7 +407,7 @@ def run(config_path, researcher_id, output, *, mock=False):
                         json.loads((out/'development-1/results.json').read_text()),results,cfg['models'],
                         cfg['_references'],metadata(cfg,'whitebox'),metadata(cfg,'blackbox'),out/'domain',
                         minimum_models=cfg['domain_protocol']['minimum_models'],
-                        minimum_families=cfg['domain_protocol']['minimum_families'])
+                        minimum_families=cfg['domain_protocol']['minimum_families'],domains=joint_domains(cfg))
                     reports={'domain':report}
                 else:
                     reports={}
@@ -364,14 +417,15 @@ def run(config_path, researcher_id, output, *, mock=False):
                             {t:cfg['_references'][t] for t in targets},targets,out/visibility,overall=cfg['overall'])
                 bill=accounting(out,cfg)
                 overall=({'metric':'visible_utility','score':reports['domain']['visible_utility'],
-                    'sealed_utility':reports['domain']['sealed_utility'],'source':'domain_protocol_v1'}
+                    'sealed_utility':reports['domain']['sealed_utility'],
+                    'source':'joint_protocol_v2' if joint_domains(cfg) else 'domain_protocol_v1'}
                     if cfg.get('domain_protocol') else reports['blackbox']['overall'])
                 complete=all(r.get('score_status')=='valid' for r in results)
                 result={'researcher':researcher['id'],'overall':overall,'complete_models':sum(r.get('score_status')=='valid' for r in results),
                     'expected_models':len(acceptance_models),'accounting':bill,'mock':mock,
                     'eligible':bool(complete and overall['score'] is not None and bill['within_budget'] and bill['unknown_calls']==0),
                     'predictor':json.loads((out/'freeze.json').read_text())['predictor'],
-                    'note':('Held-out candidates only; sealed targets use the frozen suite aggregate without target-label fitting.'
+                    'note':('One shared measurement per held-out candidate; each domain score is reused for both sealed targets without fitting.' if joint_domains(cfg) else 'Held-out candidates only; sealed targets use the frozen suite aggregate without target-label fitting.'
                         if cfg.get('domain_protocol') else 'Black-box family CV fits target-specific labels after freezing; it is not zero-shot target prediction.'),
                     **({'paid_api_calls':0,'quality_claim':'none; simulated pipeline fixture'} if mock else {})}
             finally:stop_gateway(process);process=None
@@ -382,6 +436,11 @@ def run(config_path, researcher_id, output, *, mock=False):
                 result['visible_utility']=reports['domain']['visible_utility']
                 result['sealed_utility']=reports['domain']['sealed_utility']
                 result['eligible']=result['eligible'] and result['sealed_utility'] is not None
+                if joint_domains(cfg):
+                    result.update(domains=reports['domain']['domains'],research_unit='joint',
+                        complete_domains=sum(all(row['status'] in ('OK','CONST')
+                            for visibility in ('visible','sealed') for row in report[visibility].values())
+                            for report in reports['domain']['domains'].values()))
             write(out/'result.json',result)
             update(phase='completed' if result['eligible'] else 'incomplete',finished=time.time())
     except BaseException as error:

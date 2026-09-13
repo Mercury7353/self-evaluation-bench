@@ -209,3 +209,110 @@ def test_domain_missing_reference_blocks_before_provider_access(tmp_path):
     cfg['benchmarks']['blackbox'][0]['reference']=str(incomplete)
     path.write_text(yaml.safe_dump(cfg))
     with pytest.raises(ValueError,match='Insufficient frozen holdout reference'):load(path)
+
+
+def joint_fixture(tmp_path):
+    path,cfg=fixture_config(tmp_path)
+    domains=['coding','co-work','reasoning']
+    cfg['domain_protocol']={'version':2,'domains':domains,'minimum_models':3,'minimum_families':2}
+    cfg['design']['rounds']=1
+    cfg['budgets'].update(development_usd=100,suite_usd=30,evaluation_usd=90)
+    for visibility in ('whitebox','blackbox'):
+        template=cfg['benchmarks'][visibility][0]
+        cfg['benchmarks'][visibility]=[dict(template,id=d+'-'+visibility+'-'+str(i),domain=d)
+                                      for d in domains for i in range(2)]
+    path.write_text(yaml.safe_dump(cfg))
+    return path,cfg
+
+
+@pytest.mark.parametrize('mutation',['missing_target','unknown_domain','duplicate_domain','more_runs'])
+def test_joint_invalid_target_partition_cannot_start(tmp_path,mutation):
+    path,cfg=joint_fixture(tmp_path)
+    if mutation=='missing_target':cfg['benchmarks']['blackbox'].pop()
+    elif mutation=='unknown_domain':cfg['benchmarks']['whitebox'][0]['domain']='outside'
+    elif mutation=='duplicate_domain':cfg['domain_protocol']['domains'][1]='coding'
+    else:cfg['design']['rounds']=3
+    path.write_text(yaml.safe_dump(cfg))
+    with pytest.raises(ValueError):load(path)
+
+
+def test_joint_view_and_gateway_share_budget_without_exposing_sealed_metadata(tmp_path):
+    from seb.experiment import build_gateway,prepare_workspace
+    path,cfg=joint_fixture(tmp_path);loaded=load(path)
+    view=researcher_view(loaded)
+    assert len(view['targets'])==6 and set(view['domains'])=={'coding','co-work','reasoning'}
+    assert all(len(v)==2 for v in view['domains'].values())
+    out=tmp_path/'run';out.mkdir()
+    config,tokens=build_gateway(loaded,loaded['researchers'][0],out,tmp_path/'gateway.sock',mock_url='http://127.0.0.1:9')
+    work=prepare_workspace(loaded,config,tokens,out)
+    public='\n'.join((work/name).read_text() for name in ('whitebox.json','CONTRACT.md','access.json'))
+    for t in cfg['benchmarks']['blackbox']:assert t['id'] not in public
+    for m in cfg['models'][3:]:assert m['id'] not in public
+    assert config['tokens'][tokens['development']]['cap']==100
+    assert config['suite_cost_cap_usd']==30
+    assert config['tokens'][tokens['evaluation']]['cap']==90
+    assert 'joint_domains' in json.loads((work/'access.json').read_text())
+
+
+def test_joint_offline_pipeline_measures_once_for_all_twelve_targets(tmp_path,monkeypatch):
+    root=os.environ.get('SEB_TEST_ROOT');science=os.environ.get('SEB_TEST_SCIENCE')
+    if not root or not science:pytest.skip('Set sandbox paths for joint integration')
+    import seb.experiment as experiment
+    from seb.ledger import Ledger
+    path,cfg=joint_fixture(tmp_path)
+    cfg['runtime']={'rootfs':root,'science_packages':science}
+    original=experiment.mock_submission;research_runs=[]
+    def submission(work):
+        research_runs.append(work);original(work)
+        path=work/'submission/evaluation.json';manifest=json.loads(path.read_text())
+        manifest['domain_aggregations']={
+            'coding':{'kind':'weighted_mean','weights':{'sum':1}},
+            'co-work':{'kind':'weighted_mean','weights':{'product':1}},
+            'reasoning':{'kind':'weighted_mean','weights':{'sum':1,'product':1}}}
+        path.write_text(json.dumps(manifest))
+        (work/'submission/predictor.py').write_text('''
+def fit(training_rows,target_metadata):
+    assert len(target_metadata)==6
+    assert all('whitebox' in t for t in target_metadata)
+    assert all(set(row['targets'])==set(target_metadata) for row in training_rows)
+    assert all(set(row['observations'])=={'sum','product'} for row in training_rows)
+    return list(target_metadata)
+def predict(fitted,observations):
+    return {t:sum(observations.values())/len(observations) for t in fitted}
+''')
+    monkeypatch.setattr(experiment,'mock_submission',submission)
+    path.write_text(yaml.safe_dump(cfg));out=tmp_path/'joint-run'
+    result=experiment.run(path,None,out,mock=True)
+    assert result['eligible'] and result['research_unit']=='joint' and result['expected_models']==3
+    assert result['overall']['source']=='joint_protocol_v2'
+    assert len(research_runs)==1 and set(result['domains'])=={'coding','co-work','reasoning'}
+    report=json.loads((out/'domain/scores.json').read_text())
+    assert len(report['visible'])==len(report['sealed'])==6
+    with Ledger(out/'gateway/ledger.sqlite').connect() as db:
+        calls={r['wallet']:r['n'] for r in db.execute('SELECT wallet,COUNT(*) n FROM calls GROUP BY wallet')}
+    assert calls=={'development':6,'evaluation':6}  # Two items, three models each; no domain multiplier.
+    accepted=json.loads((out/'acceptance-jobs/results.json').read_text())
+    assert len(accepted)==3 and len({r['job_id'] for r in accepted})==3
+    for row in accepted:
+        item_scores={i['id']:i['score'] for i in row['result']['items']}
+        z=row['result']['domain_scores']
+        assert z['coding']==item_scores['sum'] and z['co-work']==item_scores['product']
+        assert z['reasoning']==sum(item_scores.values())/2
+    payload=(out/'domain/visible-prediction/input.json').read_text()
+    assert 'blackbox' not in payload and 'holdout' not in payload and 'family' not in payload
+    assert not (out/'domain/sealed-predictor').exists()
+
+
+def test_completed_development_job_is_read_after_deadline_without_resubmission(tmp_path,monkeypatch):
+    import seb.supervisor as supervisor
+    (tmp_path/'candidate.job.json').write_text(json.dumps({'id':'existing-job'}))
+    calls=[]
+    def request(socket,token,path,*args):
+        calls.append(path)
+        assert path=='/research/jobs/existing-job'
+        return {'status':'ok','score_status':'valid'}
+    monkeypatch.setattr(supervisor,'request',request)
+    rows=supervisor.run_jobs({'gateway_socket':'unused'},'scoped',['candidate'],'submission',tmp_path,1)
+    assert rows[0]['score_status']=='valid' and calls==['/research/jobs/existing-job']
+    rows=supervisor.run_jobs({'gateway_socket':'unused'},'scoped',['not-submitted'],'submission',tmp_path,1)
+    assert rows[0]['score_status']=='incomplete' and len(calls)==1

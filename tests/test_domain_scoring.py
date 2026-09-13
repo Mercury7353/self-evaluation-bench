@@ -1,6 +1,6 @@
 import json
 import pytest
-from seb.domain_scoring import summarize_outputs, score_domain
+from seb.domain_scoring import summarize_outputs, summarize_joint, score_domain
 
 
 def data():
@@ -56,3 +56,25 @@ def test_submitted_code_receives_visible_dev_labels_only(tmp_path,monkeypatch):
     report=score_domain({},source,[result('dev',0)],[result(f'h{i}',i) for i in range(8)],models,refs,
         {'visible':{'scale':10000}}, {'sealed':{'scale':10000}},tmp_path/'output')
     assert len(observed)==1 and report['sealed_utility']==-1 and report['visible_utility']==1
+
+
+def test_joint_domain_macro_keeps_missing_outputs_and_separate_transfer():
+    models,_,_,base=data()
+    groups={d:{v:[d+'-'+v+str(i) for i in range(2)] for v in ('visible','sealed')}
+            for d in ('coding','co-work','reasoning')}
+    refs={t:dict(base) for group in groups.values() for targets in group.values() for t in targets}
+    predictions={m:{t:value if d!='reasoning' else 7-value for d,g in groups.items() for t in g['visible']}
+                 for m,value in base.items()}
+    scores={'coding':{m:7-v for m,v in base.items()},'co-work':{m:.5 for m in base},'reasoning':dict(base)}
+    report=summarize_joint(models,refs,groups,predictions,scores)
+    assert len(report['visible'])==len(report['sealed'])==6
+    assert report['visible_utility']==pytest.approx(1/3)
+    assert report['sealed_utility']==pytest.approx(0)
+    assert report['domains']['coding']['sealed_utility']==-1
+    assert report['domains']['co-work']['sealed_utility']==0
+    del scores['reasoning']['h0']
+    report=summarize_joint(models,refs,groups,predictions,scores)
+    assert report['domains']['reasoning']['sealed_utility']==-1
+    assert report['sealed_utility']==pytest.approx(-2/3)
+    del refs['coding-sealed0']['h0']
+    assert summarize_joint(models,refs,groups,predictions,scores)['sealed_utility'] is None

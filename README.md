@@ -119,11 +119,37 @@ allocation envelopes; actual API calls are metered by each run's ledger.
 
 A campaign manifest can set `research_unit: joint` to allocate one episode per
 researcher across its entire `domains` list. Its `candidate_suite_usd` is the
-whole-program cap. This changes allocation accounting only; the current domain
-runner still accepts one domain, so joint submissions and scoring require the
-joint execution implementation before launching these allocations. Use
+whole-program cap. Configure the execution YAML with joint protocol v2 below. Use
 `Registry.suspend_launches(reason)` to retire an earlier campaign without
 rewriting its manifest, existing claims, supervisor handles, or API ledgers.
+
+## Joint domain acceptance
+
+Set `domain_protocol: {version: 2, domains: [coding, co-work, reasoning]}` and
+assign a `domain` to every benchmark. Each domain requires two whitebox and two
+blackbox targets. The existing reference-coverage checks run before any paid
+request. Use `design.rounds: 1`; the researcher sees all six visible targets in
+one workspace. Budget fields apply once to the whole run, and `suite_usd` caps
+one complete candidate measurement across all domains.
+
+`evaluation.json` adds a `domain_aggregations` mapping. Each weighted-mean entry
+declares `weights: {item_id: positive_weight}`. Different domains may reuse the
+same item without repeating its API request. The platform calculates the scores
+from validated item results and rejects a conflicting reported mean. A custom
+entry declares `kind: custom`, its input `items`, and a frozen textual `method`;
+`run.py` returns its value in `domain_scores: {domain_id: score_in_0_to_1}`.
+Unresolved selected inputs make the corresponding domain incomplete; a missing
+custom score remains missing. Development pilots may cover fewer domains; the
+final manifest must declare all three.
+
+The required `predictor.py` fits once on all allowed visible development labels
+and shared observations. It outputs six target predictions. Independent
+acceptance runs the measurement once per held-out candidate, then compares each
+domain score with both of that domain's sealed references without refitting.
+Results include per-target and per-domain status, `complete_domains`, and equal
+domain-weighted visible/sealed utility. Research, measurement, and accounting
+completion remain separate. The operator must still prepare isolated resources,
+compatible references and provider configurations before a real campaign.
 
 `python -m seb.provider_probe --config PRIVATE_JSON --output PRIVATE_DIRECTORY`
 performs transport checks against an existing scoped allocation, preserving

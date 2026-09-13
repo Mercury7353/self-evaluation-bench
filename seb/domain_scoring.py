@@ -60,8 +60,24 @@ def summarize_outputs(models, references, visible_ids, sealed_ids, predictions, 
     return report
 
 
+def summarize_joint(models, references, domains, predictions, domain_scores,
+                    *, minimum_models=8, minimum_families=4):
+    """Score the same measurements by target, then weight each domain equally."""
+    reports={domain:summarize_outputs(models,references,targets['visible'],targets['sealed'],
+        predictions,domain_scores.get(domain,{}),minimum_models=minimum_models,minimum_families=minimum_families)
+        for domain,targets in domains.items()}
+    result={'domains':reports,'acceptance_models':[m['id'] for m in models if m['split']=='holdout'],
+            'fit_uses_sealed_labels':False,'research_unit':'joint'}
+    for visibility in ('visible','sealed'):
+        result[visibility]={t:row for report in reports.values() for t,row in report[visibility].items()}
+        values=[report[visibility+'_utility'] for report in reports.values()]
+        result[visibility+'_utility']=statistics.mean(values) if values and all(v is not None for v in values) else None
+    return result
+
+
 def score_domain(config, source, development_results, acceptance_results, models, references,
-                 visible_targets, sealed_targets, output, *, minimum_models=8, minimum_families=4):
+                 visible_targets, sealed_targets, output, *, minimum_models=8, minimum_families=4,
+                 domains=None):
     output = Path(output); output.mkdir(parents=True, exist_ok=True)
     source = Path(source)
     tasks = [i['id'] for i in json.loads((source/'evaluation.json').read_text())['items']]
@@ -94,10 +110,16 @@ def score_domain(config, source, development_results, acceptance_results, models
                        for r, p in zip(test, raw)}
     except Exception as exc:
         error = type(exc).__name__ + ': ' + str(exc)
-    domain_scores = {m['id']: by_test[m['id']]['result'].get('score') for m in held
-                     if by_test.get(m['id'], {}).get('score_status') == 'valid'}
-    report = summarize_outputs(models, references, visible_targets, sealed_targets, predictions, domain_scores,
-        minimum_models=minimum_models, minimum_families=minimum_families)
+    if domains is None:
+        domain_scores = {m['id']: by_test[m['id']]['result'].get('score') for m in held
+                         if by_test.get(m['id'], {}).get('score_status') == 'valid'}
+        report = summarize_outputs(models, references, visible_targets, sealed_targets, predictions, domain_scores,
+            minimum_models=minimum_models, minimum_families=minimum_families)
+    else:
+        domain_scores={d:{m['id']:by_test[m['id']]['result']['domain_scores'][d] for m in held
+            if by_test.get(m['id'],{}).get('result',{}).get('domain_score_status',{}).get(d)=='valid'} for d in domains}
+        report=summarize_joint(models,references,domains,predictions,domain_scores,
+            minimum_models=minimum_models,minimum_families=minimum_families)
     report.update(predictions=predictions, domain_scores=domain_scores,
                   predictor_error=error, development_models=len(train),
                   complete_models=len(test), expected_models=len(held))

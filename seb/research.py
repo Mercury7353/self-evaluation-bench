@@ -116,7 +116,8 @@ def run_suite(source,model,token,config,output,entry):
     try:
         before=validate_submission(source)
         protocol=policy_for(config,entry)
-        manifest=load_manifest(source,entry.get('minimum_items',config.get('minimum_items',100))) if protocol else None
+        manifest=load_manifest(source,entry.get('minimum_items',config.get('minimum_items',100)),
+            domains=None if entry.get('_pilot') else config.get('joint_domains')) if protocol else None
         work=output/'workspace';shutil.copytree(source,work)
         if digest_tree(work)!=before:raise ValueError('Submission changed while snapshotting')
         (output/'submission.sha256.json').write_text(json.dumps(before,indent=2))
@@ -245,7 +246,8 @@ def research_app(config):
             path=safe_path(workspace(entry),rel)
             if kind=='suite':
                 validate_submission(path)
-                if policy_for(config,entry):load_manifest(path,1 if pilot else config.get('minimum_items',100))
+                if policy_for(config,entry):load_manifest(path,1 if pilot else config.get('minimum_items',100),
+                    domains=None if pilot else config.get('joint_domains'))
             else:
                 from harbor.models.task.task import Task
                 digest_tree(path);Task(path)
@@ -269,7 +271,7 @@ def research_app(config):
                 async with lock:
                     write_json(out/'result.json',{'id':ident,'status':'running','started':time.time(),'submission_id':submission_id})
                     if kind=='suite':result=await asyncio.to_thread(run_suite,snapshot,model,token,config,out/'execution',
-                        dict(entry,minimum_items=1) if pilot else entry)
+                        dict(entry,minimum_items=1,_pilot=True) if pilot else entry)
                     else:
                         agent_token=uuid.uuid4().hex
                         config['tokens'][agent_token]=dict(entry,research=False,allow_suite=False,models=[model],

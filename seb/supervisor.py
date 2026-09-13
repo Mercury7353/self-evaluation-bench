@@ -20,11 +20,12 @@ def run_jobs(config,token,models,path,output,deadline,*,pilot=False):
             if time.time()>=deadline:raise TimeoutError('No new submission after deadline')
             job=request(config['gateway_socket'],token,'/research/suites',{'path':path,'model':model,'pilot':pilot})
             write(marker,job)
-        while time.time()<deadline:
+        while True:
             result=request(config['gateway_socket'],token,'/research/jobs/'+job['id'])
             if result['status'] not in ('queued','running'):
                 return {'model':model,'job_id':job['id'],**result}
-            time.sleep(2)
+            if time.time()>=deadline:break
+            time.sleep(min(2,max(0,deadline-time.time())))
         return {'model':model,'job_id':job['id'],'status':'incomplete','score_status':'incomplete','reason':'deadline'}
     with ThreadPoolExecutor(max_workers=config.get('suite_concurrency',4)) as pool:
         pending={pool.submit(trial,m):m for m in models}
