@@ -19,7 +19,7 @@ from .gateway import reservation
 from .ledger import Ledger
 from .runner import digest_tree
 from .scoring import score_panel
-from .domain_scoring import score_domain
+from .domain_scoring import score_domain, reference_status
 from .research_lifecycle import ResearchLifecycle
 from .supervisor import start_gateway, stop_gateway, run_jobs, freeze_program, check_designer_exit
 
@@ -484,7 +484,8 @@ def run(config_path, researcher_id, output, *, mock=False):
                         json.loads((out/'development-1/results.json').read_text()),results,cfg['models'],
                         cfg['_references'],metadata(cfg,'whitebox'),metadata(cfg,'blackbox'),out/'domain',
                         minimum_models=cfg['domain_protocol']['minimum_models'],
-                        minimum_families=cfg['domain_protocol']['minimum_families'],domains=joint_domains(cfg))
+                        minimum_families=cfg['domain_protocol']['minimum_families'],domains=joint_domains(cfg),
+                        reference_panels=cfg['_reference_panels'])
                     reports={'domain':report}
                 else:
                     reports={}
@@ -511,6 +512,7 @@ def run(config_path, researcher_id, output, *, mock=False):
             result['accounting']=accounting(out,cfg)
             result['eligible']=bool(complete and overall['score'] is not None and result['accounting']['within_budget'] and result['accounting']['unknown_calls']==0)
             if cfg.get('domain_protocol'):
+                result.update(reference_status(reports['domain']),measurement_complete=complete)
                 result['visible_utility']=reports['domain']['visible_utility']
                 result['sealed_utility']=reports['domain']['sealed_utility']
                 result['eligible']=result['eligible'] and result['sealed_utility'] is not None
@@ -520,7 +522,9 @@ def run(config_path, researcher_id, output, *, mock=False):
                             for visibility in ('visible','sealed') for row in report[visibility].values())
                             for report in reports['domain']['domains'].values()))
             write(out/'result.json',result)
-            update(phase='completed' if result['eligible'] else 'incomplete',finished=time.time())
+            update(phase='completed' if result['eligible'] else
+                'pending_reference' if result.get('reference_status')=='pending' and not result['has_submission_failure'] and complete and
+                result['accounting']['within_budget'] and result['accounting']['unknown_calls']==0 else 'incomplete',finished=time.time())
     except BaseException as error:
         update(phase='failed',error=type(error).__name__+': '+str(error),finished=time.time());raise
     finally:

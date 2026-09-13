@@ -116,8 +116,10 @@ def load(path, *, resolve_inputs=True):
         protocol=cfg['domain_protocol']
         if not isinstance(protocol,dict) or protocol.get('version') not in (1,2):
             raise ValueError('domain_protocol.version must be 1 or 2')
-        if set(protocol)-{'version','minimum_models','minimum_families','domains'}:
+        if set(protocol)-{'version','minimum_models','minimum_families','domains','allow_pending_references'}:
             raise ValueError('Unknown domain_protocol field')
+        if type(protocol.get('allow_pending_references',False)) is not bool:
+            raise ValueError('domain_protocol.allow_pending_references must be boolean')
         if protocol['version']==2:
             domains=protocol.get('domains')
             if not isinstance(domains,list) or len(domains)!=3:
@@ -173,18 +175,34 @@ def load(path, *, resolve_inputs=True):
                 cfg['_references'][tid]=refs;cfg['_reference_hashes'][tid]=hashlib.sha256(Path(target['reference']).read_bytes()).hexdigest()
                 for resource in target['resources']:
                     if not Path(resource).exists():raise ValueError('Missing white-box resource: '+resource)
-    if cfg.get('domain_protocol') and resolve_inputs:
+    if cfg.get('domain_protocol'):
         held={m['id']:m['family'] for m in models if m['split']=='holdout'}
         dev={m['id']:m['family'] for m in models if m['split']=='development'}
+        pending=cfg['domain_protocol'].get('allow_pending_references',False)
+        cfg['_reference_panels']={};cfg['_pending_reference_targets']=[]
         for visibility in ['whitebox','blackbox']:
             for target in targets[visibility]:
-                refs=cfg['_references'][target['id']]
-                panel=set(held)&set(refs)
+                refs=cfg['_references'].get(target['id'],{})
+                panel=target.get('holdout_panel')
+                if panel is None:
+                    if pending:raise ValueError('Pending references require an explicit holdout_panel for '+target['id'])
+                    if not resolve_inputs:continue
+                    panel=[m for m in held if m in refs]
+                if not isinstance(panel,list) or any(not isinstance(m,str) or m not in held for m in panel) or len(panel)!=len(set(panel)):
+                    raise ValueError('holdout_panel must contain unique held-out candidate IDs')
                 if len(panel)<cfg['domain_protocol']['minimum_models'] or len({held[m] for m in panel})<cfg['domain_protocol']['minimum_families']:
                     raise ValueError('Insufficient frozen holdout reference coverage for '+target['id'])
-                if visibility=='whitebox':
-                    panel=set(dev)&set(refs)
-                    if len(panel)<3 or len({dev[m] for m in panel})<2:
+                cfg['_reference_panels'][target['id']]=list(panel)
+                missing=[m for m in panel if m not in refs]
+                if resolve_inputs and missing:
+                    if not pending:raise ValueError('Insufficient frozen holdout reference coverage for '+target['id'])
+                    reason=target.get('reference_pending_reason')
+                    if not isinstance(reason,str) or not reason.strip():
+                        raise ValueError('Missing reference_pending_reason for '+target['id'])
+                    cfg['_pending_reference_targets'].append(target['id'])
+                if visibility=='whitebox' and resolve_inputs:
+                    development_panel=set(dev)&set(refs)
+                    if len(development_panel)<3 or len({dev[m] for m in development_panel})<2:
                         raise ValueError('Insufficient visible development reference coverage for '+target['id'])
     if 'response_cache' in cfg:
         from .response_cache import validate_config
@@ -219,5 +237,7 @@ def describe(cfg):
             'development_models':[m['id'] for m in cfg['models'] if m['split']=='development'],
             'holdout_models':[m['id'] for m in cfg['models'] if m['split']=='holdout'],
             'auxiliary_models':auxiliary_view(cfg),
+            **({'reference_panels':cfg.get('_reference_panels',{}),
+                'pending_reference_targets':cfg.get('_pending_reference_targets',[])} if cfg.get('domain_protocol') else {}),
             'whitebox':[t['id'] for t in cfg['benchmarks']['whitebox']], 'blackbox':[t['id'] for t in cfg['benchmarks']['blackbox']],
             'budgets_per_researcher_run':cfg['budgets'],'overall':cfg['overall'],'paid_api_calls':0}

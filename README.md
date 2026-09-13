@@ -206,6 +206,44 @@ not research tasks or benchmark questions. A provider model listing is weaker
 evidence than a successful inference probe, and neither verifies a complete CLI
 research session. Never place the private configuration in this repository.
 
+### Pending reference labels
+
+Domain/joint configurations normally require complete reference coverage before
+execution. To prepare references alongside research, set
+`domain_protocol.allow_pending_references: true`. Every visible and sealed target
+must then declare a fixed `holdout_panel: [candidate_ids...]`; a target missing
+labels also needs `reference_pending_reason`. Panel membership must already meet
+the configured model/family minimum. Visible development labels remain mandatory
+(at least three candidates in two families per target). Missing reference files,
+invalid scores or unavailable development resources are not waived.
+
+The fixed panel, pending reasons and held-out labels stay in operator artifacts.
+Acceptance still measures the configured held-out candidates once. A missing
+label within the declared panel makes the column `PENDING_REFERENCE`, even when
+the remaining labels exceed the numerical minimum. It cannot silently shrink
+to a different subset. Other columns keep their results; incomplete V/S summaries
+remain null and `eligible` stays false. `measurement_complete`, `reference_status`
+and `failed_target_outputs` separate delivery from reference readiness. A run
+waiting only on labels ends with phase `pending_reference`; submission/measurement
+failures retain `incomplete`. Neither terminal state authorizes a new researcher.
+
+After the operator verifies newly available labels match the frozen protocol,
+score them against saved predictions without model calls or predictor fitting:
+
+```bash
+python -m seb.reference_update RUN/domain/reference-scoring-input.json \
+  --additions PRIVATE_REFERENCE_ADDITIONS.json --output NEW_REPORT_DIRECTORY
+```
+
+The additions JSON has `version: 1`, `scores: {target_id: {heldout_id: score}}`,
+and `evidence: {target_id: {heldout_id: {source: "source URI or artifact path",
+sha256: "64 lowercase hex characters"}}}`. Only previously absent labels for
+existing panel members are accepted. It cannot replace known scores, change
+targets/panels, or supply new predictions. Output must be a new directory, and
+contains an updated scoring input for further additions. Earlier reports, model
+answers and wallets are untouched. Source hashes record provenance; the command
+does not independently establish source protocol compatibility or settle bills.
+
 ## Grader and simulated-user models
 
 Optional `auxiliary_models` entries configure fixed measurement components. They

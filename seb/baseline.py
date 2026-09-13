@@ -8,7 +8,7 @@ import tempfile
 import time
 
 from .cli import doctor, mock_provider, write
-from .domain_scoring import score_domain
+from .domain_scoring import score_domain, reference_status
 from .evaluation import load_manifest
 from .experiment import accounting, build_gateway, joint_domains, metadata, prepare_workspace
 from .experiment_config import load
@@ -122,19 +122,23 @@ def run(config_path, submission, output, *, name='fixed', mock=False,
             report=score_domain(config,acceptance/'suite',development,accepted,cfg['models'],
                 cfg['_references'],metadata(cfg,'whitebox'),metadata(cfg,'blackbox'),out/'domain',
                 minimum_models=cfg['domain_protocol']['minimum_models'],
-                minimum_families=cfg['domain_protocol']['minimum_families'],domains=joint_domains(cfg))
+                minimum_families=cfg['domain_protocol']['minimum_families'],domains=joint_domains(cfg),
+                reference_panels=cfg['_reference_panels'])
             bill=accounting(out,cfg)
             complete=sum(r.get('score_status')=='valid' for r in accepted)
             result={'baseline':name,'researcher':None,'researcher_calls':0,
                 'research_unit':'joint' if joint_domains(cfg) else 'domain',
                 'visible_utility':report['visible_utility'],'sealed_utility':report['sealed_utility'],
                 'complete_models':complete,'expected_models':len(heldout),'accounting':bill,
+                'measurement_complete':complete==len(heldout),**reference_status(report),
                 'eligible':complete==len(heldout) and report['visible_utility'] is not None and
                     report['sealed_utility'] is not None and bill['within_budget'] and bill['unknown_calls']==0,
                 'mock':mock,**({'paid_api_calls':0,'quality_claim':'none; simulated pipeline fixture'} if mock else {})}
             if joint_domains(cfg):result['domains']=report['domains']
             write(out/'result.json',result)
-            update(phase='completed' if result['eligible'] else 'incomplete',finished=time.time())
+            update(phase='completed' if result['eligible'] else
+                'pending_reference' if result['reference_status']=='pending' and not result['has_submission_failure'] and complete==len(heldout) and
+                bill['within_budget'] and bill['unknown_calls']==0 else 'incomplete',finished=time.time())
             return result
     except BaseException as error:
         update(phase='failed',error=type(error).__name__+': '+str(error),finished=time.time())
