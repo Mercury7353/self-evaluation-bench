@@ -19,7 +19,7 @@ def runtime_files(binary=None):
 
 
 def launch_codex(root, workspace, trace, gateway_socket, designer_token, model, prompt,
-                 *, timeout, effort, binary=None, resume_thread=None, extra_env=None, extra_binds=()):
+                 *, timeout, effort, binary=None, resume_thread=None, extra_env=None, extra_binds=(), stop_requested=None):
     trace = Path(trace).resolve(); trace.mkdir(parents=True, exist_ok=True)
     workspace = Path(workspace).resolve()
     (workspace/'.codex').mkdir(exist_ok=True)
@@ -53,7 +53,7 @@ def launch_codex(root, workspace, trace, gateway_socket, designer_token, model, 
     private.write_text(json.dumps(config)); private.chmod(0o600)
     try:
         return run_logged([shutil.which('node'), str(harness/'run.mjs'), str(private)],
-                          trace/'codex', timeout=timeout)
+                          trace/'codex', timeout=timeout, stop_requested=stop_requested)
     finally:
         private.unlink(missing_ok=True)
         (trace/'launch.private.json').unlink(missing_ok=True)

@@ -145,7 +145,8 @@ def create_app(config):
         if entry.get('native_responses'):
             return JSONResponse({'error': 'Use the frozen native Responses researcher route'}, 403)
         if time.time()>=entry.get('deadline_epoch',float('inf')):
-            return JSONResponse({'error':{'type':'deadline_exceeded','message':'The execution deadline has passed'}},409)
+            from .limit_events import deadline_response
+            return deadline_response(config,entry)
         raw_request = await request.body()
         try:
             body = json.loads(raw_request)
@@ -171,7 +172,8 @@ def create_app(config):
             request_key = Path(backend['key_file']).read_text().strip() if backend.get('key_file') else key
             async def execute():
                 if time.time()>=entry.get('deadline_epoch',float('inf')):
-                    return JSONResponse({'error':{'type':'deadline_exceeded','message':'The execution deadline has passed'}},409)
+                    from .limit_events import deadline_response
+                    return deadline_response(config,entry)
                 return await metered_request(request, body, raw_request, config, entry, ledger,
                                              amount=amount, price=price, backend=backend, key=request_key)
             limit=config.get('request_concurrency_per_model')

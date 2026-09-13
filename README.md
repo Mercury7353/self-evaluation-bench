@@ -68,7 +68,11 @@ The submission contains `run.py`, `evaluation.json`, `README.md`, and any requir
 
 `evaluation.preflight: true` checks all configured candidate transports through the same metered pipeline before researcher launch. These calls use the development wallet and deadline. Wrong/empty delivered answers do not fail transport readiness. Optional `budgets.judge_usd` reserves a separate, currently inaccessible judge wallet.
 
-Every round shares the original development wallet and total development deadline; `design.checkpoint_seconds` bounds each researcher turn (default at most two hours). The controller snapshots the submission, evaluates development models, and provides visible-target feedback for the next configured round. Exact unchanged snapshots reuse their earliest development job IDs, including wrong and empty answers. Each round must produce a valid submission. The predeclared selection policy is the **last valid round**; acceptance results never select a checkpoint. If the researcher consumes the full development time, controller feedback can be incomplete; the frozen valid submission can still enter acceptance.
+Every round shares the original development wallet and total development deadline; `design.checkpoint_seconds` bounds each researcher turn (default at most two hours). The controller snapshots the submission, evaluates development models, and provides visible-target feedback for the next configured round. Exact unchanged snapshots reuse their earliest development job IDs, including wrong and empty answers. The predeclared selection policy is the **last valid saved submission in the last valid round**; acceptance results never select a checkpoint. If the researcher consumes the full development time, controller feedback can be incomplete; the frozen valid submission can still enter acceptance.
+
+While a researcher is running, the host saves changed, structurally valid submissions about every five seconds and at exit before the original deadline. It checks required files, the manifest, entry-point syntax, and copy hashes; execution and measurement quality are verified later. Partial edits remain in the original workspace for audit. Joint/domain mode requires `predictor.py` for a valid snapshot. The archive does not capture every intermediate edit.
+
+A local researcher-wallet reservation denial stops the researcher and preserves the latest valid snapshot. This can occur before actual charges reach the cap: the next request's conservative reservation may not fit. A host timeout or persisted gateway deadline rejection also permits freezing; neither starts another research run. Deadline expiry prevents new development jobs, while existing exact-snapshot job IDs remain readable. Native upstream policy/quota blocks, accounting overshoot closures, and ordinary harness failures stay failures with saved artifacts. Unknown charges are retained and still prevent accounting eligibility. `research-checkpoints/outcome.json` and `freeze.json` identify the reason and evidence separately from acceptance results.
 
 Final acceptance measures all configured candidates afresh under its separate wallet. Submission files, reference/config hashes, and job IDs are persisted. No automatic researcher restart, budget reset, or answer-dependent retry occurs. Infrastructure retries are bounded by the frozen execution policy. Empty/refused/invalid delivered answers score zero; missing execution is unscored and marks coverage incomplete.
 
@@ -244,7 +248,7 @@ turn into a failed run; terminal errors and unfinished zero-exit turns do.
 Each private run directory contains:
 
 - `state.json`, `result.json`, `provenance.json`, resolved configuration;
-- researcher traces, immutable round checkpoints and `freeze.json`;
+- researcher traces, `research-checkpoints/` saved versions and stop evidence, immutable round checkpoints and `freeze.json`;
 - per-model job/result files, item evidence and original usage;
 - `whitebox/` and `blackbox/` scores with model-level predictions;
 - `gateway/ledger.sqlite`: original reservations, known charges and unknown usage.

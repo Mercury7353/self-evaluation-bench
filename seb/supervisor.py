@@ -66,7 +66,7 @@ def check_designer_exit(trace, returncode, *, harness='claude_code'):
                 except ValueError:pass
         failed=any(e.get('type') in ('turn.failed','error') for e in events)
         completed=any(e.get('type')=='turn.completed' for e in events)
-        if failed or returncode not in (0,124) or returncode==0 and not completed:
+        if failed or returncode != 0 or not completed:
             raise RuntimeError(f'Codex researcher exited {returncode}; inspect the native SDK trace')
         return
     result = {}
@@ -76,7 +76,7 @@ def check_designer_exit(trace, returncode, *, harness='claude_code'):
             try: event = json.loads(line)
             except ValueError: continue
             if event.get('type') == 'result': result = event
-    if returncode not in (0, 124) or result.get('is_error'):
+    if returncode != 0 or result.get('is_error'):
         raise RuntimeError(f'Designer exited {returncode}: ' + str(result.get('result', 'see designer trace'))[:2000])
 
 

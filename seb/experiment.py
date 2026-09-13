@@ -20,6 +20,7 @@ from .ledger import Ledger
 from .runner import digest_tree
 from .scoring import score_panel
 from .domain_scoring import score_domain
+from .research_lifecycle import ResearchLifecycle
 from .supervisor import start_gateway, stop_gateway, run_jobs, freeze_program, check_designer_exit
 
 
@@ -153,6 +154,12 @@ not constant predictions. Each domain's two undisclosed targets use exactly its 
 
 Final acceptance reports per-target results and separate visible/sealed utility, averaged equally
 across domains. It never trains a new predictor on undisclosed labels or treats domains as independent runs.
+
+Keep submission/ in a complete, runnable state, including predictor.py. The controller saves
+structurally valid snapshots about every five seconds and at normal exit. If your research time or
+researcher-call budget runs out, it freezes the latest valid saved snapshot, not the highest-scoring
+version. Partial edits are retained for audit. Validation of a snapshot does not establish correctness.
+No new development calls are submitted after the research deadline; existing matching jobs are reused.
 """
 
 
@@ -360,47 +367,70 @@ def run(config_path, researcher_id, output, *, mock=False):
                 if not mock:shutil.copytree(cfg['runtime']['rootfs'],root,symlinks=True)
                 previous_session=None;checkpoints=[];feedback_file=None
                 deadline=config['research_deadline_epoch']
+                lifecycle=ResearchLifecycle(config,work,out,researcher['id'],
+                    minimum_items=cfg['design']['minimum_items'],require_predictor=bool(cfg.get('domain_protocol')))
+                research_outcome=None
                 for index in range(cfg['design']['rounds']):
                     remaining=int(deadline-time.time())
                     if remaining<=0:break
                     update(phase='designing',round=index+1)
-                    if mock:mock_submission(work)
+                    trace=out/f'researcher-trace-{index+1}'
+                    if mock:
+                        mock_submission(work)
+                        rc=0
                     else:
                         prompt=(JOINT_TASK if joint_domains(cfg) else DOMAIN_TASK if cfg.get('domain_protocol') else TASK)
                         prompt+=f'\nRemaining total research time: {remaining} seconds.\n' if cfg.get('domain_protocol') else f'\nEach checkpoint is limited to {cfg["design"]["checkpoint_seconds"]} seconds.\nThis is round {index+1}/{cfg["design"]["rounds"]}. Remaining design time: {remaining} seconds.\n'
                         if researcher.get('prompt_file'):prompt+='\nOperator task instructions:\n'+Path(researcher['prompt_file']).read_text()
                         if feedback_file:prompt+='\nReview the previous white-box feedback at '+feedback_file+' and revise if useful.\n'
-                        trace=out/f'researcher-trace-{index+1}'
                         common={'timeout':min(remaining,cfg['design']['checkpoint_seconds']),
                             'effort':researcher.get('effort'),
                             'extra_env':{'SEB_CONTEXT':'/workspace/access.json','PYTHONPATH':'/workspace:/opt/science'},
-                            'extra_binds':[(cfg['runtime']['science_packages'],'/opt/science',True)]}
+                            'extra_binds':[(cfg['runtime']['science_packages'],'/opt/science',True)],
+                            'stop_requested':lifecycle.poll}
                         if researcher['harness']=='codex':
                             rc=launch_codex(root,work,trace,config['gateway_socket'],tokens['designer'],researcher['model'],prompt,
                                 binary=cfg['runtime'].get('codex_binary'),resume_thread=previous_session,**common)
-                            check_designer_exit(trace,rc,harness='codex')
-                            previous_session=json.loads((trace/'thread.json').read_text())['thread_id']
                         else:
                             rc=launch_claude(root,work,trace,config['gateway_socket'],tokens['designer'],researcher['id'],prompt,
                                 resume_session=previous_session,**common)
-                            check_designer_exit(trace,rc);previous_session=session_id(trace)
-                    source=work/'submission';load_manifest(source,cfg['design']['minimum_items'],domains=config.get('joint_domains'))
+                    research_outcome=lifecycle.finish(trace,rc,harness=researcher['harness'])
+                    if research_outcome['reason'] in ('upstream_blocked','researcher_accounting_guard'):
+                        raise RuntimeError('Research stopped: '+research_outcome['reason']+'; saved snapshots and ledger preserved')
+                    if not mock and not research_outcome['expected_resource_stop']:
+                        try:check_designer_exit(trace,rc,harness=researcher['harness'])
+                        except RuntimeError:
+                            research_outcome['reason']='harness_error'
+                            write(out/'research-checkpoints/outcome.json',research_outcome)
+                            raise
+                        if researcher['harness']=='codex':
+                            previous_session=json.loads((trace/'thread.json').read_text())['thread_id']
+                        else:previous_session=session_id(trace)
+                    selected=lifecycle.select();source=Path(selected['path'])
                     checkpoint=out/'checkpoints'/f'round-{index+1}';checkpoint.parent.mkdir(exist_ok=True)
                     freeze_program(source,checkpoint)
+                    # Use exactly the saved version even if the live directory has partial edits.
+                    selected_path=f'controller-selection-{index+1}'
+                    freeze_program(checkpoint,work/selected_path)
                     # Reuse exact-snapshot measurements, including complete wrong/empty answers.
                     dev=[m for m in cfg['models'] if m['split']=='development']
                     jobfolder=out/f'development-{index+1}';jobfolder.mkdir()
                     reused=reused_jobs(config,[m['id'] for m in dev],source)
                     for model,job in reused.items():write(jobfolder/(model+'.job.json'),job)
                     update(phase='development_evaluation',round=index+1)
-                    results=run_jobs(config,tokens['development'],[m['id'] for m in dev],'submission',jobfolder,deadline)
+                    results=run_jobs(config,tokens['development'],[m['id'] for m in dev],selected_path,jobfolder,deadline)
                     report=score_panel(config,checkpoint,results,dev,config['whitebox']['references'],config['whitebox']['targets'],
                         out/f'development-scores-{index+1}',overall=cfg['overall'],heldout=False)
                     # Give only visible-target feedback to the next round.
                     feedback_file=f'/workspace/feedback-round-{index+1}.json'
                     write(work/f'feedback-round-{index+1}.json',report)
-                    checkpoints.append({'round':index+1,'path':str(checkpoint),'whitebox_overall':report['overall']['score']})
+                    checkpoints.append({'round':index+1,'path':str(checkpoint),'whitebox_overall':report['overall']['score'],
+                        'research_snapshot':selected['sequence'],'research_outcome':research_outcome})
                     write(out/'checkpoints.json',checkpoints)
+                    if research_outcome['reason']=='checkpoint_time_limit':
+                        # Legacy multi-round mode has per-round time limits inside one total window.
+                        lifecycle.reason=None;lifecycle.evidence=None
+                    elif research_outcome['expected_resource_stop']:break
                 if not checkpoints:raise RuntimeError('Researcher produced no valid frozen submission before the deadline')
                 # Predeclared policy: final round, never chosen with black-box acceptance scores.
                 source=Path(checkpoints[-1]['path'])
@@ -408,6 +438,7 @@ def run(config_path, researcher_id, output, *, mock=False):
                 freeze_program(source,acceptance/'suite')
                 write(out/'freeze.json',{'selected_round':checkpoints[-1]['round'],'policy':'last_valid_round',
                     'files':digest_tree(acceptance/'suite'),'frozen_at':time.time(),
+                    'research_snapshot':checkpoints[-1]['research_snapshot'],'research_outcome':research_outcome,
                     'predictor':'submitted' if (source/'predictor.py').is_file() else ('missing_required_predictor' if cfg.get('domain_protocol') else 'fixed_ridge_baseline')})
                 # Revoke researcher access before measuring the hidden panel.
                 (work/'access.json').unlink(missing_ok=True)
@@ -436,6 +467,7 @@ def run(config_path, researcher_id, output, *, mock=False):
                     if cfg.get('domain_protocol') else reports['blackbox']['overall'])
                 complete=all(r.get('score_status')=='valid' for r in results)
                 result={'researcher':researcher['id'],'overall':overall,'complete_models':sum(r.get('score_status')=='valid' for r in results),
+                    'research_outcome':research_outcome,
                     'expected_models':len(acceptance_models),'accounting':bill,'mock':mock,
                     'eligible':bool(complete and overall['score'] is not None and bill['within_budget'] and bill['unknown_calls']==0),
                     'predictor':json.loads((out/'freeze.json').read_text())['predictor'],

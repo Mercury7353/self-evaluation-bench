@@ -147,7 +147,8 @@ def install_routes(app, config, ledger, access):
         if not entry or not entry.get('native_responses'):
             return JSONResponse({'error': 'Native researcher access required'}, 403)
         if time.time() >= entry['deadline_epoch']:
-            return JSONResponse({'error': 'Research deadline exceeded'}, 409)
+            from .limit_events import deadline_response
+            return deadline_response(config, entry)
         if blocked.exists():
             return JSONResponse({'error': 'Native upstream is blocked; preserve the existing run'}, 403)
         raw = await request.body()

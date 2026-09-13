@@ -22,20 +22,46 @@ def contained(root, command, *, cwd='/', env=None, network=False, binds=()):
     return args+['--chdir',cwd]+command
 
 
-def run_logged(args, log, *, timeout, cwd=None, env=None):
+def run_logged(args, log, *, timeout, cwd=None, env=None, stop_requested=None):
     log=Path(log);log.parent.mkdir(parents=True,exist_ok=True)
     # Gateway credentials are never included in this command argv.
     with log.with_suffix('.stdout').open('wb') as out,log.with_suffix('.stderr').open('wb') as err:
         p=subprocess.Popen(args,stdout=out,stderr=err,cwd=cwd,env=env or BASE_ENV,start_new_session=True)
-        info={'pid':p.pid,'started':time.time(),'argv':args}
+        info={'pid':p.pid,'started':time.time(),'argv':args,'timeout_seconds':timeout}
         log.with_suffix('.process.json').write_text(json.dumps(info,indent=2))
-        try:rc=p.wait(timeout=timeout)
+        reason=None
+        deadline=time.monotonic()+timeout
+        try:
+            while True:
+                if p.poll() is not None:
+                    rc=p.returncode;break
+                if stop_requested:
+                    reason=stop_requested()
+                    if reason:raise subprocess.TimeoutExpired(args,timeout)
+                remaining=deadline-time.monotonic()
+                if remaining<=0:
+                    reason='timeout';raise subprocess.TimeoutExpired(args,timeout)
+                try:
+                    rc=p.wait(timeout=min(1,remaining) if stop_requested else remaining)
+                    break
+                except subprocess.TimeoutExpired:
+                    if not stop_requested or time.monotonic()>=deadline:
+                        reason='timeout';raise
         except subprocess.TimeoutExpired:
-            os.killpg(p.pid,signal.SIGTERM)
+            try:os.killpg(p.pid,signal.SIGTERM)
+            except ProcessLookupError:pass
             try:p.wait(timeout=15)
             except subprocess.TimeoutExpired:os.killpg(p.pid,signal.SIGKILL);p.wait()
-            rc=124
-        info.update(returncode=rc,finished=time.time())
+            rc=124 if reason=='timeout' else 125
+        except BaseException:
+            try:os.killpg(p.pid,signal.SIGTERM)
+            except ProcessLookupError:pass
+            try:p.wait(timeout=15)
+            except subprocess.TimeoutExpired:os.killpg(p.pid,signal.SIGKILL);p.wait()
+            info.update(returncode=p.returncode,finished=time.time(),termination_reason='supervisor_error')
+            log.with_suffix('.process.json').write_text(json.dumps(info,indent=2))
+            raise
+        info.update(returncode=rc,finished=time.time(),termination_reason=reason)
         log.with_suffix('.process.json').write_text(json.dumps(info,indent=2))
     return rc
 
@@ -107,7 +133,7 @@ def build_task(environment, destination, cache, logdir):
     return {'cwd':cwd,'env':env,'base_image':image}
 
 
-def launch_claude(root, workspace, trace, gateway_socket, token, model, prompt, *, timeout, effort=None, extra_env=None, output_tokens=16384, research_network=False, resume_session=None, extra_binds=()):
+def launch_claude(root, workspace, trace, gateway_socket, token, model, prompt, *, timeout, effort=None, extra_env=None, output_tokens=16384, research_network=False, resume_session=None, extra_binds=(), stop_requested=None):
     trace=Path(trace);trace.mkdir(parents=True,exist_ok=True)
     root=Path(root)
     package=Path(__file__).parent.resolve()
@@ -141,7 +167,7 @@ def launch_claude(root, workspace, trace, gateway_socket, token, model, prompt, 
            (capture,'/opt/seb_tool_capture.py',True),(launchfile,'/run/launch.json',True),(settings,'/run/settings.json',True),*extra_binds]
     args=contained(root,['/usr/local/bin/python','/opt/seb_entry.py'],cwd='/workspace',binds=binds,network=research_network)
     # IS_SANDBOX=1 permits root only inside the fully isolated namespace.
-    rc=run_logged(args,trace/'claude',timeout=timeout)
+    rc=run_logged(args,trace/'claude',timeout=timeout,stop_requested=stop_requested)
     # Never retain scoped auth in the public artifact manifest.
     launchfile.unlink(missing_ok=True)
     return rc
