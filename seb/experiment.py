@@ -187,7 +187,9 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
         'upstream':mock_url or first['upstream'],
         'prices':{m['id']:m['price'] for m in all_models},
         'model_backends':{m['id']:{'model':m['model'],'key_file':secretfiles[m['provider']],
-                            'upstream':mock_url or cfg['providers'][m['provider']]['upstream']} for m in all_models},
+                            'upstream':mock_url or cfg['providers'][m['provider']]['upstream'],
+                            **({'wire_api':'openai_responses','effort':m['effort'],'native_limits':m['native_limits']}
+                               if cfg['providers'][m['provider']].get('wire_api')=='openai_responses' else {})} for m in all_models},
         'efforts':{m['id']:m['effort'] for m in all_models if m.get('effort')},
         'evaluation_policy':cfg['evaluation']['policy'],'minimum_items':cfg['design']['minimum_items'],
         'require_item_budgets':True,'allow_pilots':True,'suite_cost_cap_usd':budget['suite_usd'],

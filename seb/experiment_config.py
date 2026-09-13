@@ -48,6 +48,8 @@ def load(path, *, resolve_inputs=True):
     for pid,provider in providers.items():
         identifier(pid,'provider id')
         if not provider.get('upstream') or not provider.get('key_env'):raise ValueError('Each provider requires upstream and key_env')
+        if provider.get('wire_api','anthropic') not in ('anthropic','openai_responses'):
+            raise ValueError('Provider wire_api must be anthropic or openai_responses')
     models=cfg.get('models',[]);researchers=cfg.get('researchers',[])
     if not models or not researchers:raise ValueError('Nonempty models and researchers lists required')
     for group,label in [(models,'model'),(researchers,'researcher')]:
@@ -56,6 +58,12 @@ def load(path, *, resolve_inputs=True):
             ids.append(identifier(item.get('id'),label+' id'))
             if item.get('provider') not in providers:raise ValueError('Unknown provider for '+item['id'])
             if not item.get('model'):raise ValueError('Provider model name required')
+            if providers[item['provider']].get('wire_api')=='openai_responses':
+                if not item.get('effort'):raise ValueError('Responses model needs a frozen effort')
+                limits=item.get('native_limits',{})
+                for name in ('max_context_tokens','max_output_tokens'):
+                    if type(limits.get(name)) is not int or limits[name]<=0:raise ValueError('Responses model needs native_limits.'+name)
+                if limits['max_output_tokens']>131072:raise ValueError('Unsupported Responses model output limit')
             for price in ['input','output']:
                 value=item.get('price',{}).get(price)
                 if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<0:raise ValueError('Finite nonnegative per-million-token prices required')
@@ -75,6 +83,8 @@ def load(path, *, resolve_inputs=True):
     for researcher in researchers:
         if researcher.get('prompt_file') and resolve_inputs and not Path(local(researcher['prompt_file'])).is_file():raise ValueError('Missing researcher prompt_file')
         if researcher.get('harness') not in ['claude_code','codex','mock']:raise ValueError('Supported researcher harnesses: claude_code, codex, mock')
+        if providers[researcher['provider']].get('wire_api')=='openai_responses' and researcher['harness']=='claude_code':
+            raise ValueError('Responses researchers use the native Codex route; the adapter is for candidate wallets')
         if researcher['harness']=='codex':
             if not researcher.get('effort'):raise ValueError('Codex researcher requires a frozen effort')
             limits=researcher.get('native_limits',{})

@@ -58,7 +58,7 @@ seb budget runs/researcher-a-001
 
 `validate` resolves local inputs without making model calls. `run` makes paid calls unless `--mock` is explicitly paired with the mock harness. Multiple researcher entries use the same experiment specification; run one selected researcher per new output directory. Budgets are **per invocation**, not a shared cap across concurrent experiments. Use an external scheduler or shell loop for multiple independent runs.
 
-Providers must implement the Anthropic Messages protocol at `upstream + /anthropic/v1/messages`, including streaming/tool use for Claude Code. The supplied routing supports distinct providers for different models. Plain OpenAI-only endpoints require an adapter; changing the URL alone does not convert the protocol.
+Providers default to the Anthropic Messages protocol at `upstream + /anthropic/v1/messages`, including streaming/tool use for Claude Code. For OpenAI candidate models, set provider `wire_api: openai_responses` and `upstream: https://api.openai.com/v1`; specify each model's frozen `effort`, `native_limits.max_output_tokens`, and `native_limits.max_context_tokens`. The candidate adapter handles text and schema-based function tools through Responses, preserving opaque reasoning and assistant phases across tool turns. It retains original requests, native responses and usage for accounting. Unsupported modalities, context edits and effort changes fail explicitly. OpenAI researchers use the native Codex harness described below.
 
 ## Researcher interface and isolation
 
@@ -107,8 +107,8 @@ its historical scores are unchanged.
 
 The operator must verify target/candidate versions and curate resource files;
 schema validation does not establish scientific reference comparability.
-Native Codex researcher transport is available as described below. Native OpenAI
-candidate adaptation, equivalent-cost cache charging, and curated online research
+Native Codex researcher transport and OpenAI text/tool candidate adaptation are
+available. Equivalent-cost cache charging and curated online research
 still require integration before using those features.
 
 `seb.campaign.Registry` registers an immutable matrix of researcher/domain/budget

@@ -70,6 +70,8 @@ def classify_failure(status, raw=b'', *, exception=None, incomplete_stream=False
     except (ValueError, TypeError):
         error = None
     error_text = json.dumps(error).lower() if error else ''
+    if 'cyber_policy' in error_text:
+        return 'policy_error', False
     permanent = ('insufficient_quota', 'quota_exceeded', 'spend_limit', 'budget_exceeded',
                  'credit balance', 'insufficient balance', 'billing_hard_limit',
                  'invalid_api_key', 'authentication_error', 'permission_error')
@@ -150,12 +152,29 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
         if item_id not in entry.get('allowed_item_ids', []):
             return JSONResponse({'error':'A declared x-seb-item-id is required'},400)
         scopes[entry['item_scope_prefix']+hashlib.sha256(item_id.encode()).hexdigest()] = config['item_cost_cap_usd']
+    adapter, upstream_body, upstream_path = None, None, request.url.path
+    if backend.get('wire_api') == 'openai_responses':
+        if request.url.path.endswith('/count_tokens'):
+            return JSONResponse({'input_tokens':len(json.dumps(body,ensure_ascii=False).encode())+4096},
+                                headers={'x-seb-token-count-method':'conservative-local-byte-bound'})
+        if request.url.path != '/anthropic/v1/messages':
+            return JSONResponse({'error':'Use the common candidate text/tool interface'},400)
+        from .responses_candidate import CandidateAdapter
+        token = request.headers.get('x-api-key') or request.headers.get('authorization','').removeprefix('Bearer ')
+        adapter = CandidateAdapter(root,backend,body['model'],entry['wallet']+'\0'+body['model']+'\0'+token)
+        try:
+            upstream_body, translated_bound = adapter.prepare(body, price)
+            amount = max(amount, translated_bound)
+        except (ValueError, KeyError, TypeError, AttributeError) as error:
+            return JSONResponse({'error':str(error)},400)
+        upstream_path='/responses'
     operation_id = request.headers.get('x-seb-operation-id', uuid.uuid4().hex)
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', operation_id):
         return JSONResponse({'error': 'Invalid operation ID'}, 400)
     fingerprint = hashlib.sha256(json.dumps({'path':request.url.path,'body':body,'policy':policy,
         'remote_model':backend.get('model',body['model']),
         'upstream':backend.get('upstream',config.get('upstream','http://127.0.0.1:9')),
+        **({'wire_api':backend['wire_api'],'effort':backend['effort'],'native_limits':backend['native_limits'],'price':price} if adapter else {}),
         **({'budget_scopes':scopes,'item_id':item_id} if scopes else {})},
         sort_keys=True,separators=(',',':')).encode()).hexdigest()
     scope_key = hashlib.sha256((entry['wallet'] + '\0' + operation_id).encode()).hexdigest()
@@ -175,10 +194,11 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
     (operation/'request.json').write_text(json.dumps({'operation_id': operation_id, 'fingerprint': fingerprint,
                                                     'wallet': entry['wallet'], 'created': time.time()}))
     upstream = backend.get('upstream', config.get('upstream', 'http://127.0.0.1:9')).rstrip('/')
-    upstream_body = dict(body, model=backend.get('model', body['model']))
+    upstream_body = upstream_body if adapter else dict(body, model=backend.get('model', body['model']))
     upstream_raw = json.dumps(upstream_body, ensure_ascii=False).encode()
     headers = {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json',
                'anthropic-version': request.headers.get('anthropic-version', '2023-06-01')}
+    if adapter:headers.pop('anthropic-version')
     attempts = []
     final_raw, final_status, media_type = b'', 500, 'application/json'
     for index in range(policy['infra_retries'] + 1):
@@ -193,6 +213,7 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
                 'created': time.time(), 'reservation_usd': amount, 'policy': policy,
                 'request_sha256': hashlib.sha256(raw_request).hexdigest(),
                 'upstream_request_sha256': hashlib.sha256(upstream_raw).hexdigest()}
+        if adapter:meta.update(wire_api='openai_responses',upstream_path=upstream_path)
         for scope in entry.get('trace_scopes', []):
             if not re.fullmatch('[0-9a-f]{32}', scope): raise ValueError('Invalid trace scope')
             marker = root/'scopes'/scope; marker.mkdir(parents=True, exist_ok=True)
@@ -217,7 +238,7 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
         try:
             async with asyncio.timeout(policy['attempt_timeout_seconds']):
                 async with httpx.AsyncClient(timeout=httpx.Timeout(policy['attempt_timeout_seconds'], connect=30), trust_env=False) as client:
-                    async with client.stream('POST', upstream + request.url.path, content=upstream_raw, headers=headers) as response:
+                    async with client.stream('POST', upstream + upstream_path, content=upstream_raw, headers=headers) as response:
                         status = response.status_code
                         response_headers = dict(response.headers)
                         streaming = 'text/event-stream' in response.headers.get('content-type', '')
@@ -225,13 +246,22 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
                             async for chunk in response.aiter_bytes():
                                 out.write(chunk); out.flush()
             raw = (folder/'response.body').read_bytes()
-            usage, terminal = usage_from_wire(raw, streaming)
+            native_status=None
+            if adapter:
+                from .native_responses import read_usage
+                usage,native_status=read_usage(raw,streaming)
+                usage=usage or {};terminal=bool(native_status)
+                if usage:usage.setdefault('input_tokens_details',{})
+            else:
+                usage, terminal = usage_from_wire(raw, streaming)
             state, retry = classify_failure(status, raw, incomplete_stream=streaming and not terminal)
             if state == 'completed' and not streaming:
                 try:
                     data = json.loads(raw)
-                    if not isinstance(data, dict) or not any(k in data for k in ('content', 'choices', 'input_tokens')):
+                    if not isinstance(data, dict) or not any(k in data for k in (('output',) if adapter else ('content', 'choices', 'input_tokens'))):
                         raise ValueError('Missing provider response envelope')
+                    if adapter and native_status not in ('completed','incomplete'):
+                        raise ValueError('Responses candidate did not produce a terminal answer')
                 except (ValueError, TypeError):
                     state, retry = 'invalid_provider_response', False
             # Terminal streaming error events are provider failures, not model answers.
@@ -244,6 +274,10 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
                         state, retry = classify_failure(status, line[5:]); break
             if terminal: charge = cost(usage, price)
             if request.url.path.endswith('/count_tokens') and state == 'completed': charge = 0.
+            translated = None
+            if adapter and state=='completed':
+                try:translated=adapter.translate(json.loads(raw),body.get('stream',False))
+                except (ValueError,KeyError,TypeError,AttributeError):state,retry='response_translation_error',False
         except asyncio.CancelledError:
             ledger.finish(call_id, None, {}, 'transport_unknown')
             meta.update(state='transport_unknown', complete=False, finished=time.time())
@@ -251,7 +285,12 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
             raise
         except Exception as error:
             raw = (folder/'response.body').read_bytes() if (folder/'response.body').exists() else b''
-            usage, _ = usage_from_wire(raw, streaming)
+            if adapter:
+                from .native_responses import read_usage
+                usage, _ = read_usage(raw, streaming)
+                usage = usage or {}
+            else:
+                usage, _ = usage_from_wire(raw, streaming)
             state, retry = classify_failure(status, raw, exception=error)
             meta['error'] = type(error).__name__
         if charge is not None and charge > amount + 1e-9:
@@ -265,8 +304,11 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
         (folder/'meta.json').write_text(json.dumps(meta, indent=2))
         attempts.append({'id': call_id, 'state': ledger_state, 'retryable': retry})
         if state == 'completed':
-            final_raw = mask_model(raw, streaming, body['model']) if backend.get('model') else raw
-            final_status, media_type = status, ('text/event-stream' if streaming else 'application/json')
+            if adapter:final_raw,media_type=translated
+            else:
+                final_raw = mask_model(raw, streaming, body['model']) if backend.get('model') else raw
+                media_type='text/event-stream' if streaming else 'application/json'
+            final_status=status
             break
         # Do not expose provider error messages (which may contain model IDs/URLs).
         final_raw = json.dumps({'type': 'error', 'error': {'type': state,

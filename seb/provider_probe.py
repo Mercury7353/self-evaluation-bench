@@ -57,12 +57,15 @@ async def _probe(config, token, output):
                 text = ''.join(b.get('text', '') for b in data.get('content', []) if b.get('type') == 'text')
                 row.update(nonempty_answer=bool(text.strip()), usage=data.get('usage'),
                            stop_reason=data.get('stop_reason'))
+                if isinstance(data.get('error'), dict):
+                    row['error_type'] = data['error'].get('type')
             except (ValueError, AttributeError, TypeError):
                 row['nonempty_answer'] = False
             row['transport_ok'] = response.status_code == 200
             state['rows'].append(row)
-            if response.status_code == 402:
+            if response.status_code == 402 or row.get('error_type') in ('configuration_or_quota_error', 'policy_error'):
                 state['stopped_on_quota'] = True
+                state['stop_reason'] = row.get('error_type', 'budget_exceeded')
             persist(state_path, state)
             if state.get('stopped_on_quota'):
                 break
