@@ -9,13 +9,74 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import sqlite3
+import subprocess
 import time
 
 from .runner import digest_tree
 
 
-def prepare_continuation(output, cfg, researcher):
+def _sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _assert_dead(record):
+    if 'returncode' not in record or 'finished' not in record:
+        raise ValueError('Source process termination is not recorded')
+    try:
+        os.kill(record['pid'], 0)
+    except ProcessLookupError:
+        return
+    raise ValueError('Source process is still present')
+
+
+def migration_handoff(output, destination_host, source_service):
+    """Freeze a host transfer on the stopped source, outside researcher mounts.
+
+    This is an explicit host move, separate from the one local continuation.
+    The destination rechecks these hashes before opening the original wallet.
+    """
+    output = Path(output).resolve()
+    host = socket.gethostname()
+    if not destination_host or destination_host == host:
+        raise ValueError('Migration requires a different, explicit destination host')
+    status = subprocess.check_output(['systemctl', '--user', 'show', source_service,
+                                     '-p', 'ActiveState', '--value'], text=True).strip()
+    if status not in ('inactive', 'failed'):
+        raise ValueError('Stop the source service before freezing its migration')
+    state = json.loads((output/'state.json').read_text())
+    if state.get('phase') != 'failed' or not state.get('error', '').startswith('InterruptedError:'):
+        raise ValueError('Only an operator-interrupted source may migrate')
+    trace_name = ('researcher-trace-continuation-1' if state.get('research_continuation')
+                  else 'researcher-trace-1')
+    if (output/'migrations').exists():
+        raise ValueError('A host migration has already been attempted')
+    trace = output/trace_name
+    for path in [trace/'codex.process.json', *output.glob('research-jobs/*/execution/*.process.json')]:
+        _assert_dead(json.loads(path.read_text()))
+    thread = json.loads((trace/'thread.json').read_text())['thread_id']
+    rollouts = list((output/'researcher-work/.codex/sessions').rglob('*'+thread+'*.jsonl'))
+    if len(rollouts) != 1:
+        raise ValueError('Original SDK context is missing or ambiguous')
+    paths = [output/'state.json', output/'provenance.json', output/'gateway/ledger.sqlite',
+             trace/'codex.process.json', trace/'thread.json', rollouts[0]]
+    paths.extend(output.glob('research-jobs/*/request.json'))
+    paths.extend(output.glob('research-jobs/*/result.json'))
+    record = {'version': 1, 'kind': 'host_migration', 'output': str(output),
+              'source_host': host, 'destination_host': destination_host,
+              'source_service': source_service, 'source_service_state': status,
+              'source_trace': trace_name, 'thread_id': thread,
+              'frozen_at': time.time(),
+              'files': {str(p.relative_to(output)): _sha(p) for p in paths}}
+    path = output/'migration-handoff.json'
+    with path.open('x') as stream:
+        stream.write(json.dumps(record, indent=2))
+    path.chmod(0o600)
+    return path
+
+
+def prepare_continuation(output, cfg, researcher, *, handoff=None):
     output = Path(output)
     state = json.loads((output/'state.json').read_text())
     provenance = json.loads((output/'provenance.json').read_text())
@@ -34,21 +95,41 @@ def prepare_continuation(output, cfg, researcher):
                  'research-checkpoints/outcome.json', 'gateway/native-upstream-blocked.json'):
         if (output/name).exists():
             raise ValueError('Research already stopped or entered finalization: '+name)
-    destination = output/'continuations/1'
+    migration = None
+    if handoff:
+        if Path(handoff).resolve() != (output/'migration-handoff.json').resolve():
+            raise ValueError('Use the controller-owned migration handoff')
+        migration = json.loads(Path(handoff).read_text())
+        if (migration.get('kind') != 'host_migration' or migration.get('version') != 1
+                or migration.get('output') != str(output.resolve())
+                or migration.get('source_service_state') not in ('inactive', 'failed')
+                or migration.get('source_host') == socket.gethostname()
+                or migration.get('destination_host') != socket.gethostname()
+                or migration.get('source_trace') not in ('researcher-trace-1', 'researcher-trace-continuation-1')):
+            raise ValueError('Migration must run on the verified destination after source shutdown')
+        required = {'state.json', 'provenance.json', 'gateway/ledger.sqlite',
+                    migration['source_trace']+'/codex.process.json', migration['source_trace']+'/thread.json'}
+        if not required.issubset(migration.get('files', {})):
+            raise ValueError('Migration handoff is missing source evidence')
+        for name, digest in migration['files'].items():
+            path = (output/name).resolve()
+            if not path.is_relative_to(output.resolve()) or _sha(path) != digest:
+                raise ValueError('Source evidence changed after migration handoff: '+name)
+    destination = output/('migrations/1' if migration else 'continuations/1')
     if destination.parent.exists():
-        raise ValueError('A research continuation has already been attempted')
-    trace = output/'researcher-trace-1'
+        raise ValueError('A research continuation or host migration has already been attempted')
+    trace = output/(migration['source_trace'] if migration else 'researcher-trace-1')
     process = json.loads((trace/'codex.process.json').read_text())
     if ('returncode' not in process or 'finished' not in process
             or process.get('termination_reason') != 'supervisor_error'):
         raise ValueError('Original native harness termination is not recorded')
-    try:
-        os.kill(process['pid'], 0)
-    except ProcessLookupError:
-        pass
-    else:
-        raise ValueError('Original native harness is still present')
+    # PIDs are host-local. The source verified termination before freezing the
+    # handoff; checking that PID on another host could target an unrelated user.
+    if not migration:
+        _assert_dead(process)
     thread = json.loads((trace/'thread.json').read_text())['thread_id']
+    if migration and thread != migration['thread_id']:
+        raise ValueError('Migration cannot change the SDK thread')
     work = output/'researcher-work'
     rollouts = list((work/'.codex/sessions').rglob('*'+thread+'*.jsonl'))
     if len(rollouts) != 1 or not rollouts[0].stat().st_size or not (output/'researcher-rootfs').is_dir():
@@ -65,7 +146,12 @@ def prepare_continuation(output, cfg, researcher):
         if not request.exists():
             continue
         result = job/'result.json'
-        if not result.exists() or json.loads(result.read_text()).get('status') not in ('ok', 'error'):
+        status = json.loads(result.read_text()) if result.exists() else {}
+        terminal_incomplete = (migration and status.get('status') == 'incomplete'
+            and status.get('finished') and status.get('accounting_status') == 'settled'
+            and status.get('cost', {}).get('cost_complete') is True
+            and not status.get('cost', {}).get('pending_jobs'))
+        if status.get('status') not in ('ok', 'error') and not terminal_incomplete:
             raise ValueError('Unfinished candidate jobs require separate reconciliation')
         jobs[job.name] = {name: hashlib.sha256((job/name).read_bytes()).hexdigest()
                           for name in ('request.json', 'result.json')}
@@ -94,6 +180,8 @@ def prepare_continuation(output, cfg, researcher):
               'rollout': str(rollouts[0]), 'rollout_sha256_before': hashlib.sha256(rollouts[0].read_bytes()).hexdigest(),
               'ledger_before_sha256': hashlib.sha256((destination/'ledger.before.sqlite').read_bytes()).hexdigest(),
               'candidate_jobs_before': jobs, 'directory': str(destination), 'continued_at': time.time(),
+              'trace_directory': 'researcher-trace-migration-1' if migration else 'researcher-trace-continuation-1',
+              'host': socket.gethostname(), 'migration': migration,
               'reason': 'Operator infrastructure interruption; same SDK thread, clock, workspace and ledger'}
     (destination/'record.json').write_text(json.dumps(record, indent=2))
     return record

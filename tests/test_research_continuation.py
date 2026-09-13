@@ -74,7 +74,67 @@ def test_continuation_rejects_non_infrastructure_or_unreconciled_research(tmp_pa
     assert ledger.status() == before and not (out/'continuations').exists()
 
 
-def test_controller_continues_original_jobs_snapshot_and_clock_through_acceptance(tmp_path, monkeypatch):
+def frozen_transfer(tmp_path, monkeypatch, *, terminal_incomplete=False):
+    import seb.research_continuation as continuation
+    out, cfg, r, ledger = paused(tmp_path)
+    if terminal_incomplete:
+        job=out/'research-jobs/retained-incomplete'; job.mkdir(parents=True)
+        (job/'request.json').write_text('{}')
+        (job/'result.json').write_text(json.dumps({'status':'incomplete','finished':time.time(),
+            'accounting_status':'settled','cost':{'cost_complete':True,'pending_jobs':[]}}))
+    monkeypatch.setattr(continuation.socket, 'gethostname', lambda: 'source-host')
+    original = continuation.subprocess.check_output
+    monkeypatch.setattr(continuation.subprocess, 'check_output',
+        lambda command, **kwargs: 'failed\n' if command[0] == 'systemctl' else original(command, **kwargs))
+    handoff = continuation.migration_handoff(out, 'destination-host', 'source.service')
+    monkeypatch.setattr(continuation.socket, 'gethostname', lambda: 'destination-host')
+    return out, cfg, r, ledger, handoff
+
+
+def test_migration_preserves_context_without_reusing_another_hosts_pid(tmp_path, monkeypatch):
+    import seb.research_continuation as continuation
+    out, cfg, r, ledger, handoff = frozen_transfer(tmp_path, monkeypatch)
+    before = ledger.status()
+    monkeypatch.setattr(continuation.os, 'kill', lambda *_: pytest.fail('Do not probe a foreign host PID'))
+    record = prepare_continuation(out, cfg, r, handoff=handoff)
+    assert record['thread_id'] == 'original-thread'
+    assert record['trace_directory'] == 'researcher-trace-migration-1'
+    assert record['directory'] == str(out/'migrations/1')
+    assert record['migration']['source_host'] == 'source-host'
+    assert ledger.status() == before
+    with pytest.raises(ValueError, match='already been attempted'):
+        prepare_continuation(out, cfg, r, handoff=handoff)
+
+
+def test_migration_keeps_terminal_incomplete_measurement_without_rerunning(tmp_path, monkeypatch):
+    out, cfg, r, ledger, handoff = frozen_transfer(tmp_path, monkeypatch, terminal_incomplete=True)
+    path=out/'research-jobs/retained-incomplete/result.json'; before=path.read_bytes()
+    record=prepare_continuation(out, cfg, r, handoff=handoff)
+    assert path.read_bytes()==before and 'retained-incomplete' in record['candidate_jobs_before']
+    assert ledger.status('designer')[0]['calls']==1
+
+
+@pytest.mark.parametrize('mutation', ['wrong_host', 'state', 'ledger', 'context', 'thread', 'missing_evidence'])
+def test_migration_rejects_changed_source_and_wrong_destination(tmp_path, monkeypatch, mutation):
+    import seb.research_continuation as continuation
+    out, cfg, r, ledger, handoff = frozen_transfer(tmp_path, monkeypatch)
+    if mutation == 'wrong_host': monkeypatch.setattr(continuation.socket, 'gethostname', lambda: 'another-host')
+    elif mutation == 'state':
+        path=out/'state.json'; path.write_text(path.read_text()+'\n')
+    elif mutation == 'ledger': ledger.reserve('new-unsettled-call', 'development', 'm', 1)
+    elif mutation == 'context': (out/'researcher-work/.codex/sessions/rollout-original-thread.jsonl').write_text('changed')
+    else:
+        record=json.loads(handoff.read_text())
+        if mutation == 'thread': record['thread_id']='another-thread'
+        else: del record['files']['gateway/ledger.sqlite']
+        handoff.write_text(json.dumps(record))
+    before=ledger.status()
+    with pytest.raises(ValueError): prepare_continuation(out, cfg, r, handoff=handoff)
+    assert ledger.status()==before and not (out/'migrations').exists()
+
+
+@pytest.mark.parametrize('migrate', [False, True])
+def test_controller_continues_original_jobs_snapshot_and_clock_through_acceptance(tmp_path, monkeypatch, migrate):
     import yaml
     import seb.experiment as experiment
     from test_experiment import fixture_config
@@ -129,7 +189,16 @@ def test_controller_continues_original_jobs_snapshot_and_clock_through_acceptanc
         before = json.loads((out/'state.json').read_text())
         original_provenance = (out/'provenance.json').read_bytes()
         original_wallet = Ledger(out/'gateway/ledger.sqlite').status('development')
-        result = experiment.run(path, None, out, resume_research=True)
+        handoff = None
+        if migrate:
+            import seb.research_continuation as continuation
+            monkeypatch.setattr(continuation.socket, 'gethostname', lambda: 'source-host')
+            original = continuation.subprocess.check_output
+            monkeypatch.setattr(continuation.subprocess, 'check_output',
+                lambda command, **kwargs: 'failed\n' if command[0] == 'systemctl' else original(command, **kwargs))
+            handoff = continuation.migration_handoff(out, 'destination-host', 'source.service')
+            monkeypatch.setattr(continuation.socket, 'gethostname', lambda: 'destination-host')
+        result = experiment.run(path, None, out, resume_research=True, migration_handoff=handoff)
         after = json.loads((out/'state.json').read_text())
         assert before['started'] == after['started']
         assert contexts[-1][0]['research_deadline_epoch'] == before['started']+cfg['design']['seconds']
@@ -139,5 +208,6 @@ def test_controller_continues_original_jobs_snapshot_and_clock_through_acceptanc
         assert set(r['job_id'] for r in reused) == set(previous_jobs)
         assert result['complete_models'] == result['expected_models']
         assert len(lives[-1].entries) == 1
+        if migrate: assert (out/'researcher-trace-migration-1/thread.json').exists()
     finally:
         provider.shutdown(); provider.server_close()

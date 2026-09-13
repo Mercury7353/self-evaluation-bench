@@ -366,8 +366,10 @@ def accounting(out, cfg):
             'note':'charged/metered_usd are equivalent quota including response replays. provider_metered_usd excludes replay charges; cache_adjusted_estimate_usd additionally applies provider prompt-cache pricing. Unknown reservations remain outstanding. None are invoices.'}
 
 
-def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=False, resume_research=False):
+def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=False, resume_research=False,
+        migration_handoff=None):
     if resume_prelaunch and resume_research:raise ValueError('Choose one recovery mode')
+    if migration_handoff and not resume_research:raise ValueError('Migration must preserve the research context')
     cfg=load(config_path)
     candidates=[r for r in cfg['researchers'] if r['id']==researcher_id] if researcher_id else cfg['researchers']
     if len(candidates)!=1:raise ValueError('Choose exactly one configured --researcher ID per output directory')
@@ -387,7 +389,7 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
         recovery=archive_unstarted(out,cfg,researcher['id'])
     if resume_research:
         from .research_continuation import prepare_continuation
-        continuation=prepare_continuation(out,cfg,researcher)
+        continuation=prepare_continuation(out,cfg,researcher,handoff=migration_handoff)
     else:out.mkdir(parents=True,exist_ok=False)
     out.chmod(0o700)
     process=None;server=None;state={'phase':'preparing','started':time.time(),'researcher':researcher['id'],'mock':mock}
@@ -439,7 +441,7 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
                     remaining=int(deadline-time.time())
                     if remaining<=0:break
                     update(phase='designing',round=index+1)
-                    trace=out/('researcher-trace-continuation-1' if continuation else f'researcher-trace-{index+1}')
+                    trace=out/(continuation['trace_directory'] if continuation else f'researcher-trace-{index+1}')
                     if mock:
                         mock_submission(work)
                         rc=0
