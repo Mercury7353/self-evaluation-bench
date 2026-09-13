@@ -174,6 +174,10 @@ def public_contract(config, entry):
     from .execution_policy import policy_for
     policy = policy_for(config, entry)
     return {'protocol_version': 1, 'evaluation_policy': policy,
+            **({'response_cache':{'version':1,'equivalent_test_charge':True,
+                'independent_sample_header':'x-seb-sample-id',
+                'default':'Identical requests reuse the same sample; specify distinct sample IDs for independent repetitions'}}
+               if config.get('response_cache') and entry['wallet'] in ('development','evaluation') else {}),
             **({'joint_domains':config['joint_domains']} if config.get('joint_domains') else {}),
             'minimum_items': config.get('minimum_items', 100),
             'pilot_minimum_items': 1 if config.get('allow_pilots') and entry.get('research') else None,

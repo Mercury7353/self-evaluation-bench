@@ -112,8 +112,8 @@ its historical scores are unchanged.
 The operator must verify target/candidate versions and curate resource files;
 schema validation does not establish scientific reference comparability.
 Native Codex researcher transport and OpenAI text/tool candidate adaptation are
-available. Equivalent-cost cache charging and curated online research
-still require integration before using those features.
+available. Optional equivalent-cost response reuse is configured below. Curated
+online research still requires an operator-prepared resource and retrieval boundary.
 
 `seb.campaign.Registry` registers an immutable matrix of researcher/domain/budget
 allocations. An atomic claim allows only one supervisor to claim a given episode;
@@ -167,8 +167,7 @@ wallet ledgers are rejected rather than replaced.
 and a checksum. Accounting includes those costs in the shared limit; inherited
 usage is not repriced using the new configuration. Its cache-adjusted estimate
 remains unknown when the original price basis has not been supplied. This is
-wallet reuse, not a response cache: cross-run equivalent-cost response caching
-still requires separate integration.
+wallet reuse; optional cross-run response caching has a separate configuration below.
 
 ## Joint domain acceptance
 
@@ -235,8 +234,8 @@ The SDK's network namespace has only a scoped bridge to this gateway. Host files
 provider keys, and host networking are not mounted. Retries are disabled on the
 native researcher transport; unknown charges retain their reservation. A request
 with an explicit operation ID may replay its saved response without another call.
-This idempotent replay is separate from cross-run equivalent-cost candidate cache
-charging, which is not yet implemented.
+This idempotent replay is separate from cross-run candidate response reuse: a new
+operation that hits the shared cache still consumes equivalent test quota.
 
 `gateway/native-wire/` stores original request/response bytes, usage, conservative
 charges and separate cache-adjusted estimates. SDK events live in each
@@ -252,6 +251,60 @@ Each private run directory contains:
 - per-model job/result files, item evidence and original usage;
 - `whitebox/` and `blackbox/` scores with model-level predictions;
 - `gateway/ledger.sqlite`: original reservations, known charges and unknown usage.
+
+Optional exact-request response reuse is configured in experiment YAML:
+
+```yaml
+response_cache:
+  version: 1
+  directory: /private/campaign-response-cache
+  namespace: frozen-campaign-v1
+```
+
+Freeze the namespace, provider/model versions, prices, and policy before the first
+run. The directory must be outside all resource mounts and researcher/candidate
+workspaces. The public contract exposes reuse semantics, never the host directory,
+namespace, other runs' evidence, or a cache listing API. Development and final
+acceptance use separate partitions. Researcher calls do not use this cache.
+
+An entry matches the full provider request, upstream, model/effort/limits, wire
+protocol, relevant headers, prices, conservative reservation, execution policy,
+and sample path. Only a complete, settled first-attempt response is published.
+Wrong, empty, refused, and terminal truncated answers are preserved exactly;
+partial/error/unknown-cost responses and successes after infrastructure retries
+are not published. Corrupt entries fail without issuing a paid fallback request.
+Per-request file locks coordinate independent gateway processes through settlement
+and publication. A crash before publication may leave no reusable entry; historical
+unknown charges remain reserved.
+
+The default is one shared sample for an identical request. Use
+`Client.chat(..., sample_id="replicate-2")` or `Client.item(..., sample_id=...)`
+for an independent sample, and distinct sample IDs for separate repetitions.
+`submit`, `suite`, and `agent` accept `sample_id` too; the server inherits its path
+through nested suite/agent tokens, including calls made by an unmodified harness.
+The HTTP header is `x-seb-sample-id` (ASCII letters/digits/underscore/hyphen, 1–128
+characters). New operation IDs alone do not request independent samples. Reusing
+an operation ID with changed input or sample ID is rejected. Replaying the same
+completed operation ID remains idempotent, without an additional quota charge.
+
+On a hit the gateway reserves the same conservative amount as a miss, then settles
+the original equivalent cost. It assigns a fresh local call ID and scope markers,
+saves the original wire response, and reconstructs native Responses tool/reasoning
+state in the new token namespace. `cache_replays` records the source evidence in
+the private ledger. This avoids a later researcher receiving extra test quota or
+borrowing another run's evidence ID. Shared samples are correlated observations,
+not independent model answers; cache wait savings can still affect wall-clock use.
+
+Accounting distinguishes:
+
+- `charged` / `charged_usd` / `metered_usd`: quota consumed, including equivalent
+  response-replay charges; budget and item/suite caps use this quantity.
+- `provider_metered_usd`: known provider usage charges, excluding response replays.
+- `cache_adjusted_estimate_usd`: actual-call estimate additionally adjusted for the
+  provider's prompt-cache discount; a response replay contributes zero.
+- `response_cache_hits`: completed shared-response replays. Scoped
+  `usage_by_model` contains actual-call usage; `equivalent_usage_by_model` also
+  includes replayed usage. Original unknown reservations remain outstanding.
 
 Prices are USD per million tokens. The ledger conservatively counts cached input at full input price; an optional `price.cache_read_multiplier` produces a separate cache-adjusted estimate. If that discount is unknown and cached input exists, the adjusted estimate is null. These are usage-based estimates, not provider invoices. Researcher fees remain separate from candidate testing fees. Unknown/aborted calls retain their reservations. A provider can report usage above a pre-request bound; overshoot closes the wallet and is reported, never presented as a guaranteed billing cap.
 

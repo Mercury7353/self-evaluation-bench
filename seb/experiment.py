@@ -220,6 +220,10 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
             'models':[researcher['id']],'deadline_epoch':config['research_deadline_epoch']}
     if budget.get('judge_usd'):
         config['tokens'][secrets.token_hex(32)]={'wallet':'judge','cap':budget['judge_usd'],'models':[]}
+    if cfg.get('response_cache'):
+        from .response_cache import validate_config
+        config['response_cache']=validate_config(cfg['response_cache'],[out,
+            cfg['runtime']['rootfs'],cfg['runtime']['science_packages']])
     if researcher and researcher['harness']=='codex':
         config['native_researcher']={'id':researcher['id'],'model':researcher['model'],
             'effort':researcher['effort'],**researcher['native_limits']}
@@ -303,11 +307,22 @@ def accounting(out, cfg):
     prices={m['id']:m['price'] for m in cfg['models']+cfg['researchers']}
     with ledger.connect() as db:
         for row in rows:
-            calls=db.execute('SELECT id,usage,charged FROM calls WHERE wallet=? AND model=?',(row['wallet'],row['model'])).fetchall()
+            calls=db.execute('SELECT c.id,c.usage,c.charged,r.call_id AS replay FROM calls c LEFT JOIN cache_replays r ON r.call_id=c.id WHERE wallet=? AND model=?',(row['wallet'],row['model'])).fetchall()
             # Historical charges remain exact. Do not reprice old usage using a
             # new run's price table, even if the logical model ID is unchanged.
-            estimates=[cache_adjusted_cost(json.loads(c['usage'] or '{}'),prices[row['model']])
-                if c['charged'] is not None and c['id'] not in inherited_ids and row['model'] in prices else None for c in calls]
+            estimates=[]
+            for c in calls:
+                if c['replay']:
+                    estimates.append(0.)
+                elif c['charged'] is None or c['id'] in inherited_ids or row['model'] not in prices:
+                    estimates.append(None)
+                elif c['charged']==0:
+                    estimates.append(0.)
+                else:
+                    estimates.append(cache_adjusted_cost(json.loads(c['usage'] or '{}'),prices[row['model']]))
+            row['equivalent_charge_usd']=row['metered_usd']
+            row['provider_metered_usd']=sum(c['charged'] or 0. for c in calls if not c['replay'])
+            row['response_cache_hits']=sum(bool(c['replay']) for c in calls)
             row['cache_adjusted_estimate_usd']=sum(estimates) if all(v is not None for v in estimates) else None
             row['cache_adjusted_known_component_usd']=sum(v for v in estimates if v is not None)
             row['inherited_calls']=sum(c['id'] in inherited_ids for c in calls)
@@ -320,7 +335,7 @@ def accounting(out, cfg):
     return {'wallets':wallets,'by_model':rows,'unknown_calls':unknown,'within_budget':within,
             'status':'settled' if not unknown else 'pending','closed_wallets':closed,'scope_violations':violations,
             **({'inherited_development':inherited} if inherited else {}),
-            'note':'Metered estimates from provider usage and configured prices; reservations are not invoices.'}
+            'note':'charged/metered_usd are equivalent quota including response replays. provider_metered_usd excludes replay charges; cache_adjusted_estimate_usd additionally applies provider prompt-cache pricing. Unknown reservations remain outstanding. None are invoices.'}
 
 
 def run(config_path, researcher_id, output, *, mock=False):

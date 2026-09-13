@@ -13,6 +13,7 @@ import httpx
 from fastapi.responses import JSONResponse, Response
 
 from .ledger import BudgetExceeded
+from .response_cache import CacheError, lease_for, sample_path
 
 
 DEFAULT_POLICY = {
@@ -146,6 +147,10 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
     from .gateway import cost, usage_from_wire
     policy = policy_for(config, entry)
     root = Path(config['artifacts'])
+    try:
+        sample = sample_path(entry, request.headers.get('x-seb-sample-id'))
+    except ValueError as error:
+        return JSONResponse({'error':str(error)},400)
     scopes = dict(entry.get('budget_scopes', {}))
     item_id = request.headers.get('x-seb-item-id')
     if entry.get('item_scope_prefix'):
@@ -172,6 +177,7 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', operation_id):
         return JSONResponse({'error': 'Invalid operation ID'}, 400)
     fingerprint = hashlib.sha256(json.dumps({'path':request.url.path,'body':body,'policy':policy,
+        **({'sample_path':sample} if sample or config.get('response_cache') else {}),
         'remote_model':backend.get('model',body['model']),
         'upstream':backend.get('upstream',config.get('upstream','http://127.0.0.1:9')),
         **({'wire_api':backend['wire_api'],'effort':backend['effort'],'native_limits':backend['native_limits'],'price':price} if adapter else {}),
@@ -199,6 +205,10 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
     headers = {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json',
                'anthropic-version': request.headers.get('anthropic-version', '2023-06-01')}
     if adapter:headers.pop('anthropic-version')
+    cache_identity={'upstream':upstream,'path':upstream_path,'body':upstream_body,
+        'wire_api':backend.get('wire_api','anthropic'),'headers':{k:v for k,v in headers.items() if k!='Authorization'},
+        'price':price,'policy':policy,'reservation_usd':amount,'sample_path':sample,
+        'native_limits':backend.get('native_limits'), 'effort':backend.get('effort')}
     attempts = []
     final_raw, final_status, media_type = b'', 500, 'application/json'
     for index in range(policy['infra_retries'] + 1):
@@ -211,6 +221,7 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
         meta = {'id': call_id, 'operation_id': operation_id, 'attempt': index + 1,
                 'wallet': entry['wallet'], 'model': body['model'], 'path': request.url.path,
                 'created': time.time(), 'reservation_usd': amount, 'policy': policy,
+                'cache_sample_path':sample,
                 'request_sha256': hashlib.sha256(raw_request).hexdigest(),
                 'upstream_request_sha256': hashlib.sha256(upstream_raw).hexdigest()}
         if adapter:meta.update(wire_api='openai_responses',upstream_path=upstream_path)
@@ -235,73 +246,111 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
             break
         (folder/'meta.json').write_text(json.dumps(meta, indent=2))
         raw, status, streaming, terminal, charge, retry, response_headers = b'', None, False, False, None, False, {}
+        usage, cached, provider_started = {}, None, False
+        lease = lease_for(config, entry, cache_identity) if index == 0 else None
         try:
-            async with asyncio.timeout(policy['attempt_timeout_seconds']):
-                async with httpx.AsyncClient(timeout=httpx.Timeout(policy['attempt_timeout_seconds'], connect=30), trust_env=False) as client:
-                    async with client.stream('POST', upstream + upstream_path, content=upstream_raw, headers=headers) as response:
-                        status = response.status_code
-                        response_headers = dict(response.headers)
-                        streaming = 'text/event-stream' in response.headers.get('content-type', '')
-                        with (folder/'response.body').open('wb') as out:
-                            async for chunk in response.aiter_bytes():
-                                out.write(chunk); out.flush()
-            raw = (folder/'response.body').read_bytes()
-            native_status=None
-            if adapter:
-                from .native_responses import read_usage
-                usage,native_status=read_usage(raw,streaming)
-                usage=usage or {};terminal=bool(native_status)
-                if usage:usage.setdefault('input_tokens_details',{})
+            try:
+                if lease:
+                    await lease.acquire(min(entry.get('deadline_epoch',float('inf')),
+                                            time.time()+policy['attempt_timeout_seconds']))
+                    cached=lease.read()
+                if cached:
+                    raw, record=cached
+                    status, streaming=record['http_status'],record['streaming']
+                    (folder/'response.body').write_bytes(raw)
+                else:
+                    if time.time()>=entry.get('deadline_epoch',float('inf')):
+                        raise CacheError('Execution deadline reached before issuing provider request')
+                    provider_started=True
+                    async with asyncio.timeout(policy['attempt_timeout_seconds']):
+                        async with httpx.AsyncClient(timeout=httpx.Timeout(policy['attempt_timeout_seconds'], connect=30), trust_env=False) as client:
+                            async with client.stream('POST', upstream + upstream_path, content=upstream_raw, headers=headers) as response:
+                                status = response.status_code
+                                response_headers = dict(response.headers)
+                                streaming = 'text/event-stream' in response.headers.get('content-type', '')
+                                with (folder/'response.body').open('wb') as out:
+                                    async for chunk in response.aiter_bytes():
+                                        out.write(chunk); out.flush()
+                    raw = (folder/'response.body').read_bytes()
+                native_status=None
+                if adapter:
+                    from .native_responses import read_usage
+                    usage,native_status=read_usage(raw,streaming)
+                    usage=usage or {};terminal=bool(native_status)
+                    if usage:usage.setdefault('input_tokens_details',{})
+                else:
+                    usage, terminal = usage_from_wire(raw, streaming)
+                state, retry = classify_failure(status, raw, incomplete_stream=streaming and not terminal)
+                if state == 'completed' and not streaming:
+                    try:
+                        data = json.loads(raw)
+                        if not isinstance(data, dict) or not any(k in data for k in (('output',) if adapter else ('content', 'choices', 'input_tokens'))):
+                            raise ValueError('Missing provider response envelope')
+                        if adapter and native_status not in ('completed','incomplete'):
+                            raise ValueError('Responses candidate did not produce a terminal answer')
+                    except (ValueError, TypeError):
+                        state, retry = 'invalid_provider_response', False
+                # Terminal streaming error events are provider failures, not model answers.
+                if streaming:
+                    for line in raw.splitlines():
+                        if not line.startswith(b'data:'): continue
+                        try: event = json.loads(line[5:])
+                        except ValueError: continue
+                        if isinstance(event, dict) and event.get('error'):
+                            state, retry = classify_failure(status, line[5:]); break
+                if terminal: charge = cost(usage, price)
+                if request.url.path.endswith('/count_tokens') and state == 'completed': charge = 0.
+                translated = None
+                if adapter and state=='completed':
+                    try:translated=adapter.translate(json.loads(raw),body.get('stream',False))
+                    except (ValueError,KeyError,TypeError,AttributeError):state,retry='response_translation_error',False
+                if cached and (state!='completed' or not terminal or charge!=record['equivalent_charge_usd'] or usage!=record['usage']):
+                    raise CacheError('Cached response differs from its settled evidence')
+            except asyncio.CancelledError:
+                cancelled='transport_unknown' if provider_started else 'cancelled_before_provider'
+                ledger.finish(call_id, None if provider_started else 0., {}, cancelled)
+                meta.update(state=cancelled, complete=False, finished=time.time())
+                (folder/'meta.json').write_text(json.dumps(meta, indent=2))
+                raise
+            except Exception as error:
+                raw = (folder/'response.body').read_bytes() if (folder/'response.body').exists() else b''
+                if adapter:
+                    from .native_responses import read_usage
+                    usage, _ = read_usage(raw, streaming)
+                    usage = usage or {}
+                else:
+                    usage, _ = usage_from_wire(raw, streaming)
+                state, retry = classify_failure(status, raw, exception=error)
+                meta['error'] = type(error).__name__
+                if not provider_started:
+                    charge, retry = 0., False
+                    usage = {}
+                    state = 'cache_error' if isinstance(error,CacheError) else 'internal_error'
+            if charge is not None and charge > amount + 1e-9:
+                state, retry = 'reservation_bound_exceeded', False
+                with ledger.connect() as db: db.execute('UPDATE wallets SET cap=0 WHERE name=?', (entry['wallet'],))
+            ledger_state = 'completed' if state == 'completed' and terminal else state
+            if cached and ledger_state=='completed':
+                ledger.finish_cached(call_id,charge,usage,record)
             else:
-                usage, terminal = usage_from_wire(raw, streaming)
-            state, retry = classify_failure(status, raw, incomplete_stream=streaming and not terminal)
-            if state == 'completed' and not streaming:
+                ledger.finish(call_id, charge, usage, ledger_state)
+            meta.update(response_cache_hit=bool(cached and ledger_state=='completed'),
+                        provider_attempted=provider_started,
+                        provider_metered_usd=charge if provider_started else 0.)
+            if lease:meta['response_cache_key']=lease.key
+            if lease and not cached and ledger_state=='completed' and terminal and charge is not None and 200<=status<300:
                 try:
-                    data = json.loads(raw)
-                    if not isinstance(data, dict) or not any(k in data for k in (('output',) if adapter else ('content', 'choices', 'input_tokens'))):
-                        raise ValueError('Missing provider response envelope')
-                    if adapter and native_status not in ('completed','incomplete'):
-                        raise ValueError('Responses candidate did not produce a terminal answer')
-                except (ValueError, TypeError):
-                    state, retry = 'invalid_provider_response', False
-            # Terminal streaming error events are provider failures, not model answers.
-            if streaming:
-                for line in raw.splitlines():
-                    if not line.startswith(b'data:'): continue
-                    try: event = json.loads(line[5:])
-                    except ValueError: continue
-                    if isinstance(event, dict) and event.get('error'):
-                        state, retry = classify_failure(status, line[5:]); break
-            if terminal: charge = cost(usage, price)
-            if request.url.path.endswith('/count_tokens') and state == 'completed': charge = 0.
-            translated = None
-            if adapter and state=='completed':
-                try:translated=adapter.translate(json.loads(raw),body.get('stream',False))
-                except (ValueError,KeyError,TypeError,AttributeError):state,retry='response_translation_error',False
-        except asyncio.CancelledError:
-            ledger.finish(call_id, None, {}, 'transport_unknown')
-            meta.update(state='transport_unknown', complete=False, finished=time.time())
+                    lease.publish(raw,charge=charge,usage=usage,status=status,streaming=streaming,
+                                  call_id=call_id,ledger_path=ledger.path)
+                except Exception as error:
+                    # A cache storage failure must not erase a settled answer.
+                    meta['cache_write_error']=type(error).__name__
+            meta.update(state=ledger_state, complete=state == 'completed' and terminal, http_status=status,
+                        retryable=retry, charge_usd=charge, usage=usage, finished=time.time(),
+                        response_sha256=hashlib.sha256(raw).hexdigest(), response_bytes=len(raw))
             (folder/'meta.json').write_text(json.dumps(meta, indent=2))
-            raise
-        except Exception as error:
-            raw = (folder/'response.body').read_bytes() if (folder/'response.body').exists() else b''
-            if adapter:
-                from .native_responses import read_usage
-                usage, _ = read_usage(raw, streaming)
-                usage = usage or {}
-            else:
-                usage, _ = usage_from_wire(raw, streaming)
-            state, retry = classify_failure(status, raw, exception=error)
-            meta['error'] = type(error).__name__
-        if charge is not None and charge > amount + 1e-9:
-            state, retry = 'reservation_bound_exceeded', False
-            with ledger.connect() as db: db.execute('UPDATE wallets SET cap=0 WHERE name=?', (entry['wallet'],))
-        ledger_state = 'completed' if state == 'completed' and terminal else state
-        ledger.finish(call_id, charge, usage, ledger_state)
-        meta.update(state=ledger_state, complete=state == 'completed' and terminal, http_status=status,
-                    retryable=retry, charge_usd=charge, usage=usage, finished=time.time(),
-                    response_sha256=hashlib.sha256(raw).hexdigest(), response_bytes=len(raw))
-        (folder/'meta.json').write_text(json.dumps(meta, indent=2))
+        finally:
+            if lease:lease.close()
         attempts.append({'id': call_id, 'state': ledger_state, 'retryable': retry})
         if state == 'completed':
             if adapter:final_raw,media_type=translated

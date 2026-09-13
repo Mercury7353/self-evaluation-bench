@@ -34,7 +34,8 @@ def scoped_cost(config,scope):
     """Exact trial attribution, including nested agents, without wallet deltas."""
     root=Path(config['artifacts']);ledger=Ledger(root/'ledger.sqlite')
     summary={'charged_usd':0.,'outstanding_reserved_usd':0.,'calls':0,
-             'rejected_requests':0,'cost_complete':True,'usage_by_model':{},'pending_jobs':[]}
+             'rejected_requests':0,'cost_complete':True,'usage_by_model':{},'pending_jobs':[],
+             'provider_metered_usd':0.,'response_cache_hits':0,'equivalent_usage_by_model':{}}
     with ledger.connect() as db:
         for marker in (root/'scopes'/scope).glob('*'):
             if not marker.is_file():continue
@@ -46,13 +47,19 @@ def scoped_cost(config,scope):
                 else:summary['cost_complete']=False
                 continue
             summary['calls']+=1
+            replay=db.execute('SELECT 1 FROM cache_replays WHERE call_id=?',(marker.name,)).fetchone()
+            if replay:summary['response_cache_hits']+=1
             if row['charged'] is None:
                 summary['outstanding_reserved_usd']+=row['reserve'];summary['cost_complete']=False
-            else:summary['charged_usd']+=row['charged']
+            else:
+                summary['charged_usd']+=row['charged']
+                if not replay:summary['provider_metered_usd']+=row['charged']
             usage=json.loads(row['usage']) if row['usage'] else {}
-            per_model=summary['usage_by_model'].setdefault(row['model'],{})
-            for key,value in usage.items():
-                if isinstance(value,(int,float)) and not isinstance(value,bool):per_model[key]=per_model.get(key,0)+value
+            for name in ['equivalent_usage_by_model']+([] if replay else ['usage_by_model']):
+                per_model=summary[name].setdefault(row['model'],{})
+                for key,value in usage.items():
+                    if isinstance(value,(int,float)) and not isinstance(value,bool):per_model[key]=per_model.get(key,0)+value
+    summary['equivalent_charge_usd']=summary['charged_usd']
     for marker in (root/'scopes'/scope/'jobs').glob('*'):
         result_path=root.parent/'research-jobs'/marker.name/'result.json'
         try:status=json.loads(result_path.read_text()).get('status')
@@ -217,6 +224,8 @@ def research_app(config):
             entry['deadline_epoch']=time.time()+entry['start_deadline_on_first_suite']
         try:
             if time.time()>=entry.get('deadline_epoch',float('inf')):raise ValueError('The wallet execution deadline has passed')
+            from .response_cache import sample_path
+            entry=dict(entry,cache_sample_path=sample_path(entry,data.get('sample_id')))
             agent_scopes=dict(entry.get('budget_scopes',{}))
             if kind=='agent' and config.get('require_item_budgets'):
                 item_id=request.headers.get('x-seb-item-id')
@@ -258,6 +267,7 @@ def research_app(config):
         submission_id=hashlib.sha256(json.dumps(digest_tree(snapshot),sort_keys=True).encode()).hexdigest()
         (out/'request.json').write_text(json.dumps({'kind':kind,'model':model,'wallet':entry['wallet'],'created':time.time(),'path':str(path),
                                                   'submission_id':submission_id,'pilot':pilot,
+                                                  'cache_sample_path':entry['cache_sample_path'],
                                                   **({'budget_scopes':agent_scopes} if kind=='agent' and config.get('require_item_budgets') else {}),
                                                   'candidate_output_tokens':output_tokens if kind=='agent' else None}))
         write_json(out/'result.json',{'id':ident,'status':'queued','queued_at':time.time(),'submission_id':submission_id})

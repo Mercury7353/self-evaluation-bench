@@ -27,7 +27,7 @@ def identifier(value,name):
 def load(path, *, resolve_inputs=True):
     path=Path(path).resolve();cfg=yaml.safe_load(path.read_text())
     if not isinstance(cfg,dict) or cfg.get('version')!=1:raise ValueError('YAML version: 1 required')
-    allowed={'version','name','runtime','providers','researchers','models','benchmarks','budgets','design','evaluation','overall','domain_protocol'}
+    allowed={'version','name','runtime','providers','researchers','models','benchmarks','budgets','design','evaluation','overall','domain_protocol','response_cache'}
     unknown=set(cfg)-allowed
     if unknown:raise ValueError('Unknown YAML fields: '+', '.join(sorted(unknown)))
     cfg=copy.deepcopy(cfg);cfg['name']=identifier(cfg.get('name'),'name')
@@ -173,6 +173,12 @@ def load(path, *, resolve_inputs=True):
                     panel=set(dev)&set(refs)
                     if len(panel)<3 or len({dev[m] for m in panel})<2:
                         raise ValueError('Insufficient visible development reference coverage for '+target['id'])
+    if 'response_cache' in cfg:
+        from .response_cache import validate_config
+        cache=validate_config(cfg['response_cache'])
+        cache['directory']=local(cfg['response_cache']['directory'])
+        cfg['response_cache']=validate_config(cache,[runtime['rootfs'],runtime['science_packages'],
+            *[r for t in targets['whitebox'] for r in t['resources']]])
     cfg['_config_path']=str(path);cfg['_config_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
     return cfg
 

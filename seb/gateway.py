@@ -107,6 +107,12 @@ def reservation(body, price):
 
 def create_app(config):
     policy_for(config)  # Fail invalid new protocols before creating wallets.
+    if config.get('response_cache'):
+        from .response_cache import validate_config
+        if not policy_for(config):raise ValueError('Response cache requires the metered candidate policy')
+        config['response_cache']=validate_config(config['response_cache'],[
+            config.get('base_root'),config.get('science_packages'),
+            *[e.get('workspace') for e in config['tokens'].values()]])
     root = Path(config['artifacts'])
     root.mkdir(parents=True, exist_ok=True)
     ledger = Ledger(root / 'ledger.sqlite')
