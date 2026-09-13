@@ -56,6 +56,18 @@ def test_missing_predictor_and_post_deadline_edits_cannot_become_valid_snapshots
     assert life.select()==selected
 
 
+def test_continuation_keeps_prior_snapshots_and_appends_without_replacing_them(tmp_path):
+    life, work, out = lifecycle(tmp_path)
+    submission(work); life.capture(force=True)
+    prior = life.select().copy()
+    restarted = ResearchLifecycle(life.config, work, out, 'r', minimum_items=2,
+        require_predictor=True, resume=True, started=life.started)
+    assert restarted.select() == prior and restarted.started == life.started
+    submission(work, 'continued'); restarted.capture(force=True)
+    assert restarted.select()['sequence'] == 2 and restarted.entries[0] == prior
+    assert "VERSION='first'" in (Path(prior['path'])/'predictor.py').read_text()
+
+
 @pytest.mark.parametrize('native',[False,True])
 def test_actual_gateway_budget_denial_is_detected_without_upstream_or_budget_reset(tmp_path,native):
     life,work,out=lifecycle(tmp_path);submission(work)

@@ -19,21 +19,30 @@ class ResearchLifecycle:
     not every intermediate edit. Executability and scientific quality are still
     independently tested during acceptance.
     """
-    def __init__(self, config, work, output, researcher, *, minimum_items, require_predictor):
+    def __init__(self, config, work, output, researcher, *, minimum_items, require_predictor,
+                 resume=False, started=None):
         self.config = config
         self.source = Path(work) / 'submission'
         self.root = Path(output) / 'research-checkpoints'
-        self.root.mkdir()
+        self.root.mkdir(exist_ok=resume)
         self.researcher = researcher
         self.minimum_items = minimum_items
         self.require_predictor = require_predictor
-        self.started = time.time()
+        self.started = time.time() if started is None else started
         self.deadline = config['research_deadline_epoch']
         self.entries = []
+        if resume and (self.root/'index.json').exists():
+            self.entries = json.loads((self.root/'index.json').read_text())
+            for index, entry in enumerate(self.entries, 1):
+                if (entry['sequence'] != index or Path(entry['path']) != self.root/f'{index:06d}'
+                        or digest_tree(entry['path']) != entry['files']):
+                    raise ValueError('Saved research checkpoint changed before continuation')
         self.last_check = 0
         self.reason = None
         self.evidence = None
         self.last_invalid = None
+        if resume and (self.root/'last-invalid.json').exists():
+            self.last_invalid = json.loads((self.root/'last-invalid.json').read_text())
         self.inspected_requests = set()
 
     def capture(self, *, force=False):

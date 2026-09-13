@@ -255,7 +255,12 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
     return config,tokens
 
 
-def prepare_workspace(cfg, config, tokens, out):
+def prepare_workspace(cfg, config, tokens, out, *, resume=False):
+    if resume:
+        work=out/'researcher-work'
+        if not work.is_dir():raise ValueError('Original researcher workspace is missing')
+        write_access(cfg,config,tokens,work)
+        return work
     work=out/'researcher-work';work.mkdir()
     write(work/'whitebox.json',researcher_view(cfg))
     contract=CONTRACT
@@ -270,12 +275,16 @@ def prepare_workspace(cfg, config, tokens, out):
             dest.parent.mkdir(parents=True,exist_ok=True)
             if src.is_dir():shutil.copytree(src,dest,symlinks=False)
             else:shutil.copy2(src,dest)
+    write_access(cfg,config,tokens,work)
+    return work
+
+
+def write_access(cfg, config, tokens, work):
     context={'token':tokens['development'],'models':researcher_view(cfg)['models'],
         'efforts':{m:config.get('efforts',{}).get(m) for m in config['tokens'][tokens['development']]['models']},
         'base_url':'http://127.0.0.1:18765','output_dir':'/workspace/client-artifacts',
         **public_contract(config,config['tokens'][tokens['development']])}
     write(work/'access.json',context);(work/'access.json').chmod(0o600)
-    return work
 
 
 def mock_submission(work):
@@ -357,7 +366,8 @@ def accounting(out, cfg):
             'note':'charged/metered_usd are equivalent quota including response replays. provider_metered_usd excludes replay charges; cache_adjusted_estimate_usd additionally applies provider prompt-cache pricing. Unknown reservations remain outstanding. None are invoices.'}
 
 
-def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=False):
+def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=False, resume_research=False):
+    if resume_prelaunch and resume_research:raise ValueError('Choose one recovery mode')
     cfg=load(config_path)
     candidates=[r for r in cfg['researchers'] if r['id']==researcher_id] if researcher_id else cfg['researchers']
     if len(candidates)!=1:raise ValueError('Choose exactly one configured --researcher ID per output directory')
@@ -371,35 +381,42 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
     if researcher['harness']=='codex':
         from .codex_harness import runtime_files
         runtime_files(cfg['runtime'].get('codex_binary'))
-    out=Path(output).resolve();recovery=None
+    out=Path(output).resolve();recovery=None;continuation=None
     if resume_prelaunch:
         from .prelaunch_recovery import archive_unstarted,restore_ledger
         recovery=archive_unstarted(out,cfg,researcher['id'])
-    out.mkdir(parents=True,exist_ok=False);out.chmod(0o700)
+    if resume_research:
+        from .research_continuation import prepare_continuation
+        continuation=prepare_continuation(out,cfg,researcher)
+    else:out.mkdir(parents=True,exist_ok=False)
+    out.chmod(0o700)
     process=None;server=None;state={'phase':'preparing','started':time.time(),'researcher':researcher['id'],'mock':mock}
     if recovery:
         state.update(started=recovery['original_started'],prelaunch_recovery=recovery)
         restore_ledger(recovery,out)
+    if continuation:state.update(started=continuation['original_started'],research_continuation=continuation)
     def update(**values):state.update(values);write(out/'state.json',state)
     def interrupted(signum,frame):raise InterruptedError('Interrupted; existing ledgers and job IDs are preserved')
     prior=signal.signal(signal.SIGTERM,interrupted)
     try:
         frozen_cfg={k:v for k,v in cfg.items() if not k.startswith('_')}
         update(phase='preparing')
-        write(out/'config.resolved.json',frozen_cfg)
-        write(out/'provenance.json',{'config_sha256':cfg['_config_sha256'],'reference_sha256':cfg['_reference_hashes'],
+        if not continuation:write(out/'config.resolved.json',frozen_cfg)
+        provenance_root=Path(continuation['directory']) if continuation else out
+        write(provenance_root/('provenance.continued.json' if continuation else 'provenance.json'),{'config_sha256':cfg['_config_sha256'],'reference_sha256':cfg['_reference_hashes'],
             'code_sha256':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(__file__).parent.iterdir() if p.suffix in ('.py','.c')},'started':state['started'],'mock':mock})
         if mock:server=mock_provider()
         with tempfile.TemporaryDirectory(prefix='seb-experiment-') as sockets:
             config,tokens=build_gateway(cfg,researcher,out,Path(sockets)/'gateway.sock',
                 mock_url=f'http://127.0.0.1:{server.server_port}' if server else None)
-            if recovery:
-                config['research_deadline_epoch']=recovery['original_deadline_epoch']
+            original_clock=continuation or recovery
+            if original_clock:
+                config['research_deadline_epoch']=original_clock['original_deadline_epoch']
                 for entry in config['tokens'].values():
-                    if 'deadline_epoch' in entry:entry['deadline_epoch']=recovery['original_deadline_epoch']
+                    if 'deadline_epoch' in entry:entry['deadline_epoch']=original_clock['original_deadline_epoch']
             process=start_gateway(config,out)
             try:
-                if cfg['evaluation']['preflight']:
+                if cfg['evaluation']['preflight'] and not continuation:
                     update(phase='preflight')
                     readiness=out/'readiness';readiness.mkdir()
                     mock_submission(readiness)
@@ -408,19 +425,21 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
                     write(out/'preflight.json',{'models':len(ready),'transport_complete':all(r.get('score_status')=='valid' for r in ready),
                         'note':'Correctness is not a transport gate; completed empty/wrong answers are retained.'})
                     if not all(r.get('score_status')=='valid' for r in ready):raise RuntimeError('Model transport preflight incomplete; no researcher launched')
-                work=prepare_workspace(cfg,config,tokens,out)
+                work=prepare_workspace(cfg,config,tokens,out,resume=bool(continuation))
                 root=out/'researcher-rootfs'
-                if not mock:shutil.copytree(cfg['runtime']['rootfs'],root,symlinks=True)
-                previous_session=None;checkpoints=[];feedback_file=None
+                if not mock and not continuation:shutil.copytree(cfg['runtime']['rootfs'],root,symlinks=True)
+                previous_session=continuation['thread_id'] if continuation else None
+                checkpoints=[];feedback_file=None
                 deadline=config['research_deadline_epoch']
                 lifecycle=ResearchLifecycle(config,work,out,researcher['id'],
-                    minimum_items=cfg['design']['minimum_items'],require_predictor=bool(cfg.get('domain_protocol')))
+                    minimum_items=cfg['design']['minimum_items'],require_predictor=bool(cfg.get('domain_protocol')),
+                    resume=bool(continuation),started=state['started'] if continuation else None)
                 research_outcome=None
                 for index in range(cfg['design']['rounds']):
                     remaining=int(deadline-time.time())
                     if remaining<=0:break
                     update(phase='designing',round=index+1)
-                    trace=out/f'researcher-trace-{index+1}'
+                    trace=out/('researcher-trace-continuation-1' if continuation else f'researcher-trace-{index+1}')
                     if mock:
                         mock_submission(work)
                         rc=0
@@ -429,6 +448,8 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
                         prompt+=f'\nRemaining total research time: {remaining} seconds.\n' if cfg.get('domain_protocol') else f'\nEach checkpoint is limited to {cfg["design"]["checkpoint_seconds"]} seconds.\nThis is round {index+1}/{cfg["design"]["rounds"]}. Remaining design time: {remaining} seconds.\n'
                         if researcher.get('prompt_file'):prompt+='\nOperator task instructions:\n'+Path(researcher['prompt_file']).read_text()
                         if feedback_file:prompt+='\nReview the previous white-box feedback at '+feedback_file+' and revise if useful.\n'
+                        if continuation:
+                            prompt+='\nContinue this same research after an operator infrastructure interruption. Your SDK context, workspace and prior jobs are preserved. Reopen Client() from access.json for refreshed scoped authentication; keep using existing job IDs and completed measurements. The original budget and deadline are unchanged.\n'
                         common={'timeout':min(remaining,cfg['design']['checkpoint_seconds']),
                             'effort':researcher.get('effort'),
                             'extra_env':{'SEB_CONTEXT':'/workspace/access.json','PYTHONPATH':'/workspace:/opt/science'},

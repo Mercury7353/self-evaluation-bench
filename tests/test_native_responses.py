@@ -260,5 +260,18 @@ def test_actual_codex_sdk_tool_roundtrip_inside_isolated_namespace(tmp_path, ups
             assert wallet['calls'] == 2 and wallet['outstanding'] == 0
             assert not (tmp_path / 'trace/sdk.private.json').exists()
             assert not (tmp_path / 'trace/launch.private.json').exists()
+            if model == 'gpt-6-astra':
+                # Same actual SDK thread after a new process and rotated gateway
+                # credential. Prior conversation and charges must survive.
+                thread_id = json.loads((tmp_path/'trace/thread.json').read_text())['thread_id']
+                cfg['tokens']['continued-native-key'] = cfg['tokens'].pop('native-test-key')
+                rc = launch_codex(image, work, tmp_path/'continued-trace', address, 'continued-native-key',
+                    model, 'Continue the same task after an infrastructure interruption.',
+                    timeout=60, effort=effort, resume_thread=thread_id)
+                check_designer_exit(tmp_path/'continued-trace', rc, harness='codex')
+                assert json.loads((tmp_path/'continued-trace/thread.json').read_text())['thread_id'] == thread_id
+                assert len(received) == 3 and 'SDK_PREFLIGHT_OK' in json.dumps(json.loads(received[-1][1])['input'])
+                assert app.state.ledger.status('designer')[0]['calls'] == 3
+                assert app.state.ledger.status('designer')[0]['outstanding'] == 0
         finally:
             gateway.should_exit = True; thread.join(timeout=5)
