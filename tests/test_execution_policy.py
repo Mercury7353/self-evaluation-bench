@@ -92,6 +92,8 @@ def test_three_transient_retries_charge_each_attempt_and_replay_after_restart(pr
 
 @pytest.mark.parametrize('response', [answer('wrong'),answer(''),answer('', 'max_tokens'),
     (400,b'{"error":{"type":"invalid_request_error"}}',{}),
+    (500,json.dumps({'error':{'type':'api_error','message':json.dumps([{'error':{
+        'code':400,'status':'INVALID_ARGUMENT','message':'Function call is missing a thought_signature'}}])}}).encode(),{}),
     (401,b'{"error":{"type":"authentication_error"}}',{}),
     (429,b'{"error":{"type":"insufficient_quota"}}',{})])
 def test_noninfra_and_model_failures_never_retry(provider,response):

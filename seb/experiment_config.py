@@ -48,8 +48,8 @@ def load(path, *, resolve_inputs=True):
     for pid,provider in providers.items():
         identifier(pid,'provider id')
         if not provider.get('upstream') or not provider.get('key_env'):raise ValueError('Each provider requires upstream and key_env')
-        if provider.get('wire_api','anthropic') not in ('anthropic','openai_responses'):
-            raise ValueError('Provider wire_api must be anthropic or openai_responses')
+        if provider.get('wire_api','anthropic') not in ('anthropic','openai_responses','chat_completions'):
+            raise ValueError('Provider wire_api must be anthropic, openai_responses or chat_completions')
     models=cfg.get('models',[]);researchers=cfg.get('researchers',[])
     auxiliary=cfg.get('auxiliary_models',[])
     if not isinstance(auxiliary,list):raise ValueError('auxiliary_models must be a list')
@@ -61,12 +61,14 @@ def load(path, *, resolve_inputs=True):
             ids.append(identifier(item.get('id'),label+' id'))
             if item.get('provider') not in providers:raise ValueError('Unknown provider for '+item['id'])
             if not item.get('model'):raise ValueError('Provider model name required')
-            if providers[item['provider']].get('wire_api')=='openai_responses':
+            if providers[item['provider']].get('wire_api') in ('openai_responses','chat_completions'):
                 if not item.get('effort'):raise ValueError('Responses model needs a frozen effort')
                 limits=item.get('native_limits',{})
                 for name in ('max_context_tokens','max_output_tokens'):
                     if type(limits.get(name)) is not int or limits[name]<=0:raise ValueError('Responses model needs native_limits.'+name)
                 if limits['max_output_tokens']>131072:raise ValueError('Unsupported Responses model output limit')
+                if providers[item['provider']].get('wire_api')=='chat_completions' and item['effort'] not in ('none','minimal','low','medium','high','xhigh','max'):
+                    raise ValueError('Invalid frozen Chat effort')
             for price in ['input','output']:
                 value=item.get('price',{}).get(price)
                 if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<0:raise ValueError('Finite nonnegative per-million-token prices required')
@@ -94,6 +96,8 @@ def load(path, *, resolve_inputs=True):
         if model.get('split') not in ['development','holdout']:raise ValueError('Model split must be development or holdout')
     if len([m for m in models if m['split']=='development'])<3:raise ValueError('At least three development models required')
     for researcher in researchers:
+        if providers[researcher['provider']].get('wire_api')=='chat_completions':
+            raise ValueError('Chat adapter is for candidate/auxiliary models; researchers use their native harness provider')
         if researcher.get('prompt_file') and resolve_inputs and not Path(local(researcher['prompt_file'])).is_file():raise ValueError('Missing researcher prompt_file')
         if researcher.get('harness') not in ['claude_code','codex','mock']:raise ValueError('Supported researcher harnesses: claude_code, codex, mock')
         if providers[researcher['provider']].get('wire_api')=='openai_responses' and researcher['harness']=='claude_code':

@@ -209,8 +209,8 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
         'prices':{m['id']:m['price'] for m in all_models},
         'model_backends':{m['id']:{'model':m['model'],'key_file':secretfiles[m['provider']],
                             'upstream':mock_url or cfg['providers'][m['provider']]['upstream'],
-                            **({'wire_api':'openai_responses','effort':m['effort'],'native_limits':m['native_limits']}
-                               if cfg['providers'][m['provider']].get('wire_api')=='openai_responses' else {})} for m in all_models},
+                            **({'wire_api':cfg['providers'][m['provider']]['wire_api'],'effort':m['effort'],'native_limits':m['native_limits']}
+                               if cfg['providers'][m['provider']].get('wire_api') in ('openai_responses','chat_completions') else {})} for m in all_models},
         'efforts':{m['id']:m['effort'] for m in all_models if m.get('effort')},
         'auxiliary_models':helper_ids,'auxiliary_model_info':auxiliary_view(cfg),
         'evaluation_policy':cfg['evaluation']['policy'],'minimum_items':cfg['design']['minimum_items'],

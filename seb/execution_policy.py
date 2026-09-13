@@ -78,6 +78,10 @@ def classify_failure(status, raw=b'', *, exception=None, incomplete_stream=False
                  'invalid_api_key', 'authentication_error', 'permission_error')
     if any(word in error_text for word in permanent):
         return 'configuration_or_quota_error', False
+    # Some compatible providers wrap a native deterministic 400 in HTTP 500.
+    # Retrying identical missing/invalid tool state cannot repair the request.
+    if any(word in error_text for word in ('invalid_argument','invalid_request_error')):
+        return 'request_error', False
     if status in (408, 429, 500, 502, 503, 504, 529):
         return 'infra_error', True
     if status is not None and status >= 400:
@@ -158,13 +162,17 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
             return JSONResponse({'error':'A declared x-seb-item-id is required'},400)
         scopes[entry['item_scope_prefix']+hashlib.sha256(item_id.encode()).hexdigest()] = config['item_cost_cap_usd']
     adapter, upstream_body, upstream_path = None, None, request.url.path
-    if backend.get('wire_api') == 'openai_responses':
+    native_responses = backend.get('wire_api') == 'openai_responses'
+    if backend.get('wire_api') in ('openai_responses','chat_completions'):
         if request.url.path.endswith('/count_tokens'):
             return JSONResponse({'input_tokens':len(json.dumps(body,ensure_ascii=False).encode())+4096},
                                 headers={'x-seb-token-count-method':'conservative-local-byte-bound'})
         if request.url.path != '/anthropic/v1/messages':
             return JSONResponse({'error':'Use the common candidate text/tool interface'},400)
-        from .responses_candidate import CandidateAdapter
+        if native_responses:
+            from .responses_candidate import CandidateAdapter
+        else:
+            from .chat_candidate import CandidateAdapter
         token = request.headers.get('x-api-key') or request.headers.get('authorization','').removeprefix('Bearer ')
         adapter = CandidateAdapter(root,backend,body['model'],entry['wallet']+'\0'+body['model']+'\0'+token)
         try:
@@ -172,7 +180,7 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
             amount = max(amount, translated_bound)
         except (ValueError, KeyError, TypeError, AttributeError) as error:
             return JSONResponse({'error':str(error)},400)
-        upstream_path='/responses'
+        upstream_path='/responses' if native_responses else '/chat/completions'
     operation_id = request.headers.get('x-seb-operation-id', uuid.uuid4().hex)
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', operation_id):
         return JSONResponse({'error': 'Invalid operation ID'}, 400)
@@ -224,7 +232,7 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
                 'cache_sample_path':sample,
                 'request_sha256': hashlib.sha256(raw_request).hexdigest(),
                 'upstream_request_sha256': hashlib.sha256(upstream_raw).hexdigest()}
-        if adapter:meta.update(wire_api='openai_responses',upstream_path=upstream_path)
+        if adapter:meta.update(wire_api=backend['wire_api'],upstream_path=upstream_path)
         for scope in entry.get('trace_scopes', []):
             if not re.fullmatch('[0-9a-f]{32}', scope): raise ValueError('Invalid trace scope')
             marker = root/'scopes'/scope; marker.mkdir(parents=True, exist_ok=True)
@@ -273,7 +281,7 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
                                         out.write(chunk); out.flush()
                     raw = (folder/'response.body').read_bytes()
                 native_status=None
-                if adapter:
+                if native_responses:
                     from .native_responses import read_usage
                     usage,native_status=read_usage(raw,streaming)
                     usage=usage or {};terminal=bool(native_status)
@@ -284,9 +292,9 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
                 if state == 'completed' and not streaming:
                     try:
                         data = json.loads(raw)
-                        if not isinstance(data, dict) or not any(k in data for k in (('output',) if adapter else ('content', 'choices', 'input_tokens'))):
+                        if not isinstance(data, dict) or not any(k in data for k in (('output',) if native_responses else ('content', 'choices', 'input_tokens'))):
                             raise ValueError('Missing provider response envelope')
-                        if adapter and native_status not in ('completed','incomplete'):
+                        if native_responses and native_status not in ('completed','incomplete'):
                             raise ValueError('Responses candidate did not produce a terminal answer')
                     except (ValueError, TypeError):
                         state, retry = 'invalid_provider_response', False
@@ -314,7 +322,7 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
                 raise
             except Exception as error:
                 raw = (folder/'response.body').read_bytes() if (folder/'response.body').exists() else b''
-                if adapter:
+                if native_responses:
                     from .native_responses import read_usage
                     usage, _ = read_usage(raw, streaming)
                     usage = usage or {}
