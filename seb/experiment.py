@@ -169,21 +169,22 @@ def joint_domains(cfg):
 
 
 def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
-    used={researcher['provider']} | {m['provider'] for m in cfg['models']}
+    all_models=([researcher] if researcher else [])+cfg['models']
+    used={m['provider'] for m in all_models}
     secretfiles={}
     for pid in sorted(used):
         provider=cfg['providers'][pid]
         key='local-mock-only' if mock_url else os.environ.get(provider['key_env'],'')
         if not key:raise ValueError('Missing provider credential environment variable: '+provider['key_env'])
         secret=out/(pid+'.secret');secret.write_text(key);secret.chmod(0o600);secretfiles[pid]=str(secret)
-    all_models=[researcher,*cfg['models']]
-    tokens={name:secrets.token_hex(32) for name in ['designer','development','evaluation']}
+    roles=(['designer'] if researcher else [])+['development','evaluation']
+    tokens={name:secrets.token_hex(32) for name in roles}
     development=[m['id'] for m in cfg['models'] if m['split']=='development']
-    first=cfg['providers'][researcher['provider']]
+    first_provider=all_models[0]['provider'];first=cfg['providers'][first_provider]
     budget=cfg['budgets']
     config={'artifacts':str(out/'gateway'),'run_root':str(out),'gateway_socket':str(socket),
         'base_root':cfg['runtime']['rootfs'],'science_packages':cfg['runtime']['science_packages'],
-        'image_cache':str(out/'image-cache'),'key_file':secretfiles[researcher['provider']],
+        'image_cache':str(out/'image-cache'),'key_file':secretfiles[first_provider],
         'upstream':mock_url or first['upstream'],
         'prices':{m['id']:m['price'] for m in all_models},
         'model_backends':{m['id']:{'model':m['model'],'key_file':secretfiles[m['provider']],
@@ -203,14 +204,16 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
         'whitebox':{'models':[m for m in cfg['models'] if m['split']=='development'],
             'references':{t:row['scores'] for t,row in researcher_view(cfg)['targets'].items()},
             'targets':metadata(cfg,'whitebox')},
-        'tokens':{tokens['designer']:{'wallet':'designer','cap':budget['researcher_usd'],'models':[researcher['id']],'deadline_epoch':time.time()+cfg['design']['seconds']},
-            tokens['development']:{'wallet':'development','cap':budget['development_usd'],'models':development,
+        'tokens':{tokens['development']:{'wallet':'development','cap':budget['development_usd'],'models':development,
                 'workspace':str(out/'researcher-work'),'research':True,'deadline_epoch':time.time()+cfg['design']['seconds']},
             tokens['evaluation']:{'wallet':'evaluation','cap':budget['evaluation_usd'],
                 'models':[m['id'] for m in cfg['models'] if not cfg.get('domain_protocol') or m['split']=='holdout'],'workspace':str(out/'acceptance-input'),'allow_suite':True,'start_deadline_on_first_suite':cfg['evaluation']['seconds']}}}
+    if researcher:
+        config['tokens'][tokens['designer']]={'wallet':'designer','cap':budget['researcher_usd'],
+            'models':[researcher['id']],'deadline_epoch':config['research_deadline_epoch']}
     if budget.get('judge_usd'):
         config['tokens'][secrets.token_hex(32)]={'wallet':'judge','cap':budget['judge_usd'],'models':[]}
-    if researcher['harness']=='codex':
+    if researcher and researcher['harness']=='codex':
         config['native_researcher']={'id':researcher['id'],'model':researcher['model'],
             'effort':researcher['effort'],**researcher['native_limits']}
         config['tokens'][tokens['designer']]['native_responses']=True
@@ -284,23 +287,32 @@ def reused_jobs(config, models, source):
 
 def accounting(out, cfg):
     ledger=Ledger(out/'gateway/ledger.sqlite');wallets=ledger.status()
+    inherited_path=out/'ledger-reuse.json'
+    inherited=json.loads(inherited_path.read_text()) if inherited_path.exists() else None
+    inherited_ids=set(inherited['call_ids']) if inherited else set()
     with ledger.connect() as db:
         rows=[dict(r) for r in db.execute('SELECT wallet, model, SUM(charged) AS metered_usd, SUM(CASE WHEN charged IS NULL THEN reserve ELSE 0 END) AS outstanding_reserved_usd, COUNT(*) AS calls FROM calls GROUP BY wallet,model')]
         unknown=db.execute('SELECT COUNT(*) FROM calls WHERE charged IS NULL').fetchone()[0]
     prices={m['id']:m['price'] for m in cfg['models']+cfg['researchers']}
     with ledger.connect() as db:
         for row in rows:
-            calls=db.execute('SELECT usage,charged FROM calls WHERE wallet=? AND model=?',(row['wallet'],row['model'])).fetchall()
-            estimates=[cache_adjusted_cost(json.loads(c['usage'] or '{}'),prices[row['model']]) if c['charged'] is not None else None for c in calls]
+            calls=db.execute('SELECT id,usage,charged FROM calls WHERE wallet=? AND model=?',(row['wallet'],row['model'])).fetchall()
+            # Historical charges remain exact. Do not reprice old usage using a
+            # new run's price table, even if the logical model ID is unchanged.
+            estimates=[cache_adjusted_cost(json.loads(c['usage'] or '{}'),prices[row['model']])
+                if c['charged'] is not None and c['id'] not in inherited_ids and row['model'] in prices else None for c in calls]
             row['cache_adjusted_estimate_usd']=sum(estimates) if all(v is not None for v in estimates) else None
+            row['cache_adjusted_known_component_usd']=sum(v for v in estimates if v is not None)
+            row['inherited_calls']=sum(c['id'] in inherited_ids for c in calls)
     limits={'designer':cfg['budgets']['researcher_usd'],'development':cfg['budgets']['development_usd'],'evaluation':cfg['budgets']['evaluation_usd']}
     if 'judge_usd' in cfg['budgets']:limits['judge']=cfg['budgets']['judge_usd']
     closed=[w['name'] for w in wallets if w['cap']==0]
     with ledger.connect() as db:
         violations=[dict(r) for r in db.execute('SELECT s.id,s.wallet,s.cap,SUM(c.charged) AS charged FROM budget_scopes s JOIN call_budget_scopes cs ON cs.scope=s.id JOIN calls c ON c.id=cs.call_id GROUP BY s.id HAVING SUM(c.charged)>s.cap+1e-9')]
-    within=not closed and not violations and all(w['charged']<=limits[w['name']]+1e-9 for w in wallets)
+    within=not closed and not violations and all(w['name'] in limits and w['charged']+w['outstanding']<=limits[w['name']]+1e-9 for w in wallets)
     return {'wallets':wallets,'by_model':rows,'unknown_calls':unknown,'within_budget':within,
             'status':'settled' if not unknown else 'pending','closed_wallets':closed,'scope_violations':violations,
+            **({'inherited_development':inherited} if inherited else {}),
             'note':'Metered estimates from provider usage and configured prices; reservations are not invoices.'}
 
 

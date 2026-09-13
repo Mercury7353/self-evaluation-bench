@@ -123,6 +123,49 @@ whole-program cap. Configure the execution YAML with joint protocol v2 below. Us
 `Registry.suspend_launches(reason)` to retire an earlier campaign without
 rewriting its manifest, existing claims, supervisor handles, or API ledgers.
 
+## Registered fixed baselines
+
+Use the same joint execution YAML and a prepared, immutable baseline submission:
+
+```bash
+seb baseline /path/to/fixed-submission \
+  --config /path/to/joint-execution.yaml \
+  --campaign /path/to/registered-campaign \
+  --episode baseline--fixed--joint--b100 \
+  --handle systemd:baseline-fixed.service
+```
+
+The submission must supply `run.py`, `evaluation.json`, `README.md`, and
+`predictor.py`. This command measures an already prepared random, stratified,
+or fixed program; it does not generate or optimize the baseline. It validates
+the registered candidate panel, targets, shared budgets, and time allocation,
+then atomically claims that one episode. A failed launch retains the original
+claim and handle. The output directory comes from the registry.
+
+Baseline execution freezes the program before development measurement and uses
+the same frozen program on held-out candidates. The visible predictor is fitted
+only on development measurements and visible labels. No researcher credential,
+wallet, model route, or agent process is created. Disable `evaluation.preflight`;
+transport calibration is separate and must not be repeated by this command.
+`--mock` runs candidate transport against the local fixture provider and makes
+no quality claim.
+
+When the campaign's `preflight_allocation.episode_id` matches this baseline,
+the command requires `reuse_existing_ledger` to name an existing SQLite ledger
+with exactly the original development wallet and unchanged cap. It binds that
+wallet to one output and links `gateway/ledger.sqlite` to the original file.
+All connections resolve the link to use the same SQLite journal. Existing calls,
+scopes, charges, and unknown reservations remain in place; another output cannot
+claim the same inherited wallet. Missing, closed, differently capped, or mixed
+wallet ledgers are rejected rather than replaced.
+
+`ledger-reuse.json` records the inherited call IDs, original charges/reservations,
+and a checksum. Accounting includes those costs in the shared limit; inherited
+usage is not repriced using the new configuration. Its cache-adjusted estimate
+remains unknown when the original price basis has not been supplied. This is
+wallet reuse, not a response cache: cross-run equivalent-cost response caching
+still requires separate integration.
+
 ## Joint domain acceptance
 
 Set `domain_protocol: {version: 2, domains: [coding, co-work, reasoning]}` and

@@ -10,8 +10,9 @@ class BudgetExceeded(Exception):
 
 class Ledger:
     def __init__(self, path):
-        self.path = str(path)
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        # All aliases of a shared ledger must use the same SQLite journal path.
+        self.path = str(Path(path).resolve())
+        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
             db.executescript('''
             CREATE TABLE IF NOT EXISTS wallets(name TEXT PRIMARY KEY, cap REAL);

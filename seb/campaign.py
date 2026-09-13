@@ -143,3 +143,43 @@ class Registry:
     def inventory(self):
         with self.connect() as db:
             return [dict(r) for r in db.execute('SELECT * FROM episodes ORDER BY id')]
+
+
+def run_baseline_episode(root, episode_id, config_path, submission, handle, *, mock=False):
+    """Claim the declared baseline and apply its existing-wallet allocation."""
+    from .baseline import run
+    from .experiment_config import load
+    manifest=json.loads((Path(root)/'manifest.frozen.json').read_text())
+    registry=Registry(root,manifest)
+    selected=[row for row in episodes(manifest) if row['id']==episode_id]
+    if len(selected)!=1 or selected[0]['kind']!='baseline' or manifest.get('research_unit')!='joint':
+        raise ValueError('Select one registered joint baseline episode')
+    allocation=selected[0];cfg=load(config_path)
+    for key,budget in [('development_usd','development_usd'),('evaluation_usd','evaluation_usd'),('candidate_suite_usd','suite_usd')]:
+        if allocation[key]!=cfg['budgets'][budget]:
+            raise ValueError('Execution budget does not match the registered allocation: '+budget)
+    if allocation['researcher_usd']!=0 or cfg['design']['seconds']!=allocation['research_seconds']:
+        raise ValueError('Baseline researcher/time allocation mismatch')
+    if cfg.get('domain_protocol',{}).get('version')!=2 or set(cfg['domain_protocol']['domains'])!=set(allocation['domains']):
+        raise ValueError('Execution must include all registered joint domains')
+    def panel(candidates):
+        return {m['id']:(m['model'],m['split'],m['family']) for m in candidates}
+    if panel(cfg['models'])!=panel(manifest['candidates']):
+        raise ValueError('Execution candidate panel differs from campaign allocation')
+    expected={(t['id'],t['visibility'],d['id']) for d in manifest['domains'] for t in d['targets']}
+    actual={(t['id'],visibility,t['domain']) for visibility,key in [('visible','whitebox'),('sealed','blackbox')]
+            for t in cfg['benchmarks'][key]}
+    if actual!=expected:raise ValueError('Execution targets differ from campaign allocation')
+    reuse=None
+    preflight=manifest.get('preflight_allocation',{})
+    if episode_id==preflight.get('episode_id'):
+        if preflight.get('wallet')!='development' or preflight.get('counts_within_development_usd')!=allocation['development_usd']:
+            raise ValueError('Invalid existing probe-wallet allocation')
+        reuse=preflight.get('reuse_existing_ledger')
+        if not reuse or not Path(reuse).is_file():
+            raise ValueError('The allocated original development ledger must exist')
+    claimed=registry.claim(episode_id,handle)
+    # A failed launch remains claimed. Inspect the concrete handle/artifacts;
+    # do not use failure as permission to mint another wallet or execution.
+    return run(config_path,submission,claimed['artifact_path'],name=allocation['researcher'],
+        mock=mock,reuse_ledger=reuse,expected_config_sha256=cfg['_config_sha256'])
