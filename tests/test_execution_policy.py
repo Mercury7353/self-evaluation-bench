@@ -119,6 +119,31 @@ def test_output_floor_rejected_before_api_or_charge(provider):
     assert Ledger(config['artifacts']+'/ledger.sqlite').status()[0]['calls']==0
 
 
+@pytest.mark.parametrize('total,expected', [(260,.0022275),(999,None)])
+def test_chat_reasoning_charge_or_unknown_persists_without_repeating(provider,total,expected):
+    server,config=provider
+    config['prices']['c01']={'input':1.5,'output':9}
+    usage={'prompt_tokens':15,'completion_tokens':4,'total_tokens':total,
+           'completion_tokens_details':{'reasoning_tokens':241}}
+    payload={'model':'secret-model','choices':[{'message':{'content':'1591'},'finish_reason':'stop'}],
+             'usage':usage}
+    server.responses=[(200,json.dumps(payload).encode(),{'Content-Type':'application/json'})]
+    with TestClient(create_app(config)) as client:
+        for _ in range(2):
+            response=client.post('/v1/openai/chat/completions',
+                json={'model':'c01','max_tokens':32768,'messages':[{'role':'user','content':'probe'}]},
+                headers={'x-api-key':'token','x-seb-operation-id':'chat-reasoning'})
+            assert response.status_code==200
+    assert len(server.bodies)==1
+    with Ledger(config['artifacts']+'/ledger.sqlite').connect() as db:
+        row=db.execute('SELECT * FROM calls').fetchone()
+    assert json.loads(row['usage'])==usage
+    if expected is None:
+        assert row['charged'] is None and row['reserve']>0
+    else:
+        assert row['charged']==pytest.approx(expected)
+
+
 @pytest.mark.parametrize('policy_enabled', [True, False])
 @pytest.mark.parametrize('path', ['/anthropic/v1/messages',
                                  '/anthropic/v1/messages/count_tokens',

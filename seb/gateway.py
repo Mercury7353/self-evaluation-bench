@@ -60,7 +60,10 @@ def cost(usage, price):
         i += usage.get('cache_creation_input_tokens', 0) * price.get('cache_write_multiplier', 2)
         o = usage.get('output_tokens', 0)
     elif 'prompt_tokens' in usage:
-        i, o = usage['prompt_tokens'], usage.get('completion_tokens', 0)
+        from .usage import chat_output_tokens
+        i, o = usage['prompt_tokens'], chat_output_tokens(usage)
+        if o is None:
+            return None
         context_tokens = i
     else:
         return None
