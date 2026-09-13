@@ -49,6 +49,9 @@ def usage_from_wire(raw, streaming):
 
 
 def cost(usage, price):
+    if 'input_tokens_details' in usage:
+        from .native_responses import usage_cost
+        return usage_cost(usage, price)
     # Conservatively charge cached input at standard input, and cache creation
     # at the most expensive published write multiplier. Never double-discount.
     if 'input_tokens' in usage:
@@ -120,6 +123,9 @@ def create_app(config):
         token = request.headers.get('x-api-key') or request.headers.get('authorization', '').removeprefix('Bearer ')
         return config['tokens'].get(token)
 
+    from .native_responses import install_routes
+    install_routes(app, config, ledger, access)
+
     @app.get('/health')
     async def health():
         return {'status': 'ok'}
@@ -136,6 +142,8 @@ def create_app(config):
     async def proxy(request: Request):
         entry = access(request)
         if not entry: return JSONResponse({'error': 'Unauthorized'}, 401)
+        if entry.get('native_responses'):
+            return JSONResponse({'error': 'Use the frozen native Responses researcher route'}, 403)
         if time.time()>=entry.get('deadline_epoch',float('inf')):
             return JSONResponse({'error':{'type':'deadline_exceeded','message':'The execution deadline has passed'}},409)
         raw_request = await request.body()

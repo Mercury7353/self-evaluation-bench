@@ -6,7 +6,7 @@ The pipeline runs **researcher → development feedback → frozen submission �
 
 ## Install
 
-Use Linux with working unprivileged user/network namespaces, Bubblewrap (`bwrap`), and Python 3.12. Paid researcher runs require a **native Linux Claude Code executable** on `PATH`; the harness runs inside an isolated root filesystem. Optional Harbor agent tasks also require Apptainer and the `agent` extra.
+Use Linux with working unprivileged user/network namespaces, Bubblewrap (`bwrap`), and Python 3.12. The `claude_code` researcher harness requires a **native Linux Claude Code executable** on `PATH`. The optional `codex` harness requires Node and the pinned SDK installation below. Both execute tools inside an isolated root filesystem. Optional Harbor agent tasks also require Apptainer and the `agent` extra.
 
 ```bash
 python3.12 -m venv .venv
@@ -35,7 +35,7 @@ Start from [examples/experiment.yaml](examples/experiment.yaml). Replace every p
 
 | YAML field | Controls |
 | --- | --- |
-| `researchers` | Researcher IDs, model/provider, `claude_code` harness, optional effort and task-instruction file |
+| `researchers` | Researcher IDs, model/provider, `claude_code` or `codex` harness, effort and optional task-instruction file |
 | `models` | Candidate IDs, provider/model, family, development/holdout split, prices and optional effort |
 | `benchmarks.whitebox` | Visible target IDs, reference JSON, scale and resource paths |
 | `benchmarks.blackbox` | Hidden target IDs and reference JSON; never copied into the researcher workspace |
@@ -106,10 +106,10 @@ sign change, or post-hoc feature selection. `result.json` reports
 its historical scores are unchanged.
 
 The operator must verify target/candidate versions and curate resource files;
-schema validation does not establish scientific reference comparability. The
-current researcher harness remains Claude Code. Native Codex/provider integration,
-equivalent-cost cache charging, and curated online research require separate
-configuration/implementation before using those features.
+schema validation does not establish scientific reference comparability.
+Native Codex researcher transport is available as described below. Native OpenAI
+candidate adaptation, equivalent-cost cache charging, and curated online research
+still require integration before using those features.
 
 `seb.campaign.Registry` registers an immutable matrix of researcher/domain/budget
 allocations. An atomic claim allows only one supervisor to claim a given episode;
@@ -123,6 +123,44 @@ completed operation IDs and unknown charges. It sends ordinary `READY` requests,
 not research tasks or benchmark questions. A provider model listing is weaker
 evidence than a successful inference probe, and neither verifies a complete CLI
 research session. Never place the private configuration in this repository.
+
+## Native Codex researcher
+
+From this checkout, install the pinned official SDK and CLI with
+`npm ci --prefix harness/codex --ignore-scripts --no-audit --no-fund`.
+Select `harness: codex` and an explicit `effort` on the researcher entry. Set its
+provider `upstream` to the Responses API base ending in `/v1`. Supply the exact
+model's prices and `native_limits`:
+
+```yaml
+harness: codex
+effort: xhigh
+native_limits:
+  max_context_tokens: 1050000
+  max_output_tokens: 128000
+  timeout_seconds: 600
+```
+
+These example limits must match the selected model. The researcher uses the
+existing bounded `researcher_usd` wallet and development deadline. Request model
+and effort are checked; native prompts, tools, and response bytes are preserved.
+Compaction is metered; opaque encrypted history reserves a full model context.
+Hosted tools, remote response references, multimodal input, background execution,
+and unpriced service tiers are rejected by this text/tool transport.
+
+Only the researcher token may use native routes; candidate tokens cannot invoke
+the researcher, and the native token cannot switch to an unvalidated wire route.
+The SDK's network namespace has only a scoped bridge to this gateway. Host files,
+provider keys, and host networking are not mounted. Retries are disabled on the
+native researcher transport; unknown charges retain their reservation. A request
+with an explicit operation ID may replay its saved response without another call.
+This idempotent replay is separate from cross-run equivalent-cost candidate cache
+charging, which is not yet implemented.
+
+`gateway/native-wire/` stores original request/response bytes, usage, conservative
+charges and separate cache-adjusted estimates. SDK events live in each
+`researcher-trace-N/codex.stdout`. Nonfatal SDK item warnings do not turn a completed
+turn into a failed run; terminal errors and unfinished zero-exit turns do.
 
 ## Artifacts and accounting
 

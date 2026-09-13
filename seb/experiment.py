@@ -12,6 +12,7 @@ import time
 from .billing import cache_adjusted_cost
 from .cli import doctor, mock_provider, request, write
 from .container import launch_claude
+from .codex_harness import launch_codex
 from .evaluation import load_manifest, public_contract
 from .experiment_config import load, describe, researcher_view
 from .gateway import reservation
@@ -155,6 +156,10 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
                 'models':[m['id'] for m in cfg['models'] if not cfg.get('domain_protocol') or m['split']=='holdout'],'workspace':str(out/'acceptance-input'),'allow_suite':True,'start_deadline_on_first_suite':cfg['evaluation']['seconds']}}}
     if budget.get('judge_usd'):
         config['tokens'][secrets.token_hex(32)]={'wallet':'judge','cap':budget['judge_usd'],'models':[]}
+    if researcher['harness']=='codex':
+        config['native_researcher']={'id':researcher['id'],'model':researcher['model'],
+            'effort':researcher['effort'],**researcher['native_limits']}
+        config['tokens'][tokens['designer']]['native_responses']=True
     if cfg['evaluation']['preflight']:
         tokens['preflight']=secrets.token_hex(32)
         config['tokens'][tokens['preflight']]={'wallet':'development','cap':budget['development_usd'],
@@ -254,7 +259,11 @@ def run(config_path, researcher_id, output, *, mock=False):
     if mock and cfg['design']['minimum_items']!=2:raise ValueError('The mock fixture requires minimum_items: 2')
     doctor(cfg['runtime']['rootfs'])
     if not mock and any('REPLACE' in m['model'] or 'YOUR_' in cfg['providers'][m['provider']]['upstream'] for m in [researcher,*cfg['models']]):raise ValueError('Replace example model and provider placeholders before a paid run')
-    if not mock and not shutil.which('claude'):raise ValueError('Install the native Claude Code executable for this harness')
+    if not mock and researcher['harness']=='claude_code' and not shutil.which('claude'):
+        raise ValueError('Install the native Claude Code executable for this harness')
+    if researcher['harness']=='codex':
+        from .codex_harness import runtime_files
+        runtime_files(cfg['runtime'].get('codex_binary'))
     out=Path(output).resolve();out.mkdir(parents=True,exist_ok=False);out.chmod(0o700)
     process=None;server=None;state={'phase':'preparing','started':time.time(),'researcher':researcher['id'],'mock':mock}
     def update(**values):state.update(values);write(out/'state.json',state)
@@ -295,11 +304,19 @@ def run(config_path, researcher_id, output, *, mock=False):
                         if researcher.get('prompt_file'):prompt+='\nOperator task instructions:\n'+Path(researcher['prompt_file']).read_text()
                         if feedback_file:prompt+='\nReview the previous white-box feedback at '+feedback_file+' and revise if useful.\n'
                         trace=out/f'researcher-trace-{index+1}'
-                        rc=launch_claude(root,work,trace,config['gateway_socket'],tokens['designer'],researcher['id'],prompt,
-                            timeout=min(remaining,cfg['design']['checkpoint_seconds']),effort=researcher.get('effort'),resume_session=previous_session,
-                            extra_env={'SEB_CONTEXT':'/workspace/access.json','PYTHONPATH':'/workspace:/opt/science'},
-                            extra_binds=[(cfg['runtime']['science_packages'],'/opt/science',True)])
-                        check_designer_exit(trace,rc);previous_session=session_id(trace)
+                        common={'timeout':min(remaining,cfg['design']['checkpoint_seconds']),
+                            'effort':researcher.get('effort'),
+                            'extra_env':{'SEB_CONTEXT':'/workspace/access.json','PYTHONPATH':'/workspace:/opt/science'},
+                            'extra_binds':[(cfg['runtime']['science_packages'],'/opt/science',True)]}
+                        if researcher['harness']=='codex':
+                            rc=launch_codex(root,work,trace,config['gateway_socket'],tokens['designer'],researcher['model'],prompt,
+                                binary=cfg['runtime'].get('codex_binary'),resume_thread=previous_session,**common)
+                            check_designer_exit(trace,rc,harness='codex')
+                            previous_session=json.loads((trace/'thread.json').read_text())['thread_id']
+                        else:
+                            rc=launch_claude(root,work,trace,config['gateway_socket'],tokens['designer'],researcher['id'],prompt,
+                                resume_session=previous_session,**common)
+                            check_designer_exit(trace,rc);previous_session=session_id(trace)
                     source=work/'submission';load_manifest(source,cfg['design']['minimum_items'])
                     checkpoint=out/'checkpoints'/f'round-{index+1}';checkpoint.parent.mkdir(exist_ok=True)
                     freeze_program(source,checkpoint)

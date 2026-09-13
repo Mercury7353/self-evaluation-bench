@@ -79,6 +79,36 @@ def test_researcher_zero_exit_error_is_failure(tmp_path):
     with pytest.raises(RuntimeError):check_designer_exit(tmp_path,0)
 
 
+def test_codex_configuration_builds_only_bounded_native_researcher_access(tmp_path,monkeypatch):
+    from seb.experiment import build_gateway
+    path,cfg=fixture_config(tmp_path)
+    researcher=cfg['researchers'][0]
+    researcher.update(harness='codex',effort='xhigh',model='gpt-5.5-2026-04-23',
+        native_limits={'max_output_tokens':128000,'max_context_tokens':1050000})
+    path.write_text(yaml.safe_dump(cfg))
+    loaded=load(path)
+    out=tmp_path/'run';out.mkdir()
+    gateway,tokens=build_gateway(loaded,loaded['researchers'][0],out,tmp_path/'gateway.sock',mock_url='http://127.0.0.1:9/v1')
+    entry=gateway['tokens'][tokens['designer']]
+    assert entry['native_responses'] and entry['wallet']=='designer'
+    assert entry['cap']==cfg['budgets']['researcher_usd'] and entry['deadline_epoch']>0
+    assert gateway['native_researcher']['model']==researcher['model']
+    assert not gateway['tokens'][tokens['development']].get('native_responses')
+    del researcher['native_limits'];path.write_text(yaml.safe_dump(cfg))
+    with pytest.raises(ValueError,match='native_limits'):load(path)
+
+
+def test_codex_completion_requires_terminal_turn_but_accepts_nonfatal_item(tmp_path):
+    path=tmp_path/'codex.stdout'
+    events=[{'type':'item.completed','item':{'type':'error','message':'nonfatal'}},{'type':'turn.completed'}]
+    path.write_text('\n'.join(map(json.dumps,events)))
+    check_designer_exit(tmp_path,0,harness='codex')
+    path.write_text(json.dumps({'type':'turn.failed','error':{'message':'failure'}}))
+    with pytest.raises(RuntimeError):check_designer_exit(tmp_path,0,harness='codex')
+    path.write_text(json.dumps({'type':'turn.started'}))
+    with pytest.raises(RuntimeError):check_designer_exit(tmp_path,0,harness='codex')
+
+
 def test_mock_full_pipeline(tmp_path,monkeypatch):
     root=os.environ.get('SEB_TEST_ROOT');science=os.environ.get('SEB_TEST_SCIENCE')
     if not root or not science:pytest.skip('Set SEB_TEST_ROOT and SEB_TEST_SCIENCE for offline namespace integration')

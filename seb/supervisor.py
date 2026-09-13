@@ -55,7 +55,19 @@ def stop_gateway(process):
         try:process.wait(timeout=30)
         except subprocess.TimeoutExpired:process.kill();process.wait()
 
-def check_designer_exit(trace, returncode):
+def check_designer_exit(trace, returncode, *, harness='claude_code'):
+    if harness=='codex':
+        path=Path(trace)/'codex.stdout'
+        events=[]
+        if path.exists():
+            for line in path.read_text().splitlines():
+                try:events.append(json.loads(line))
+                except ValueError:pass
+        failed=any(e.get('type') in ('turn.failed','error') for e in events)
+        completed=any(e.get('type')=='turn.completed' for e in events)
+        if failed or returncode not in (0,124) or returncode==0 and not completed:
+            raise RuntimeError(f'Codex researcher exited {returncode}; inspect the native SDK trace')
+        return
     result = {}
     path = Path(trace)/'claude.stdout'
     if path.exists():

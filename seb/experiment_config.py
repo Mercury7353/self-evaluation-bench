@@ -39,6 +39,8 @@ def load(path, *, resolve_inputs=True):
     if not runtime.get('rootfs'):raise ValueError('runtime.rootfs required')
     runtime['rootfs']=local(runtime['rootfs'])
     runtime['science_packages']=local(runtime.get('science_packages',sysconfig.get_path('purelib')))
+    if runtime.get('codex_binary'):
+        runtime['codex_binary']=local(runtime['codex_binary'])
     if resolve_inputs:
         if not (Path(runtime['rootfs'])/'usr/local/bin/python').is_file():raise ValueError('runtime.rootfs lacks /usr/local/bin/python')
         if not Path(runtime['science_packages']).is_dir():raise ValueError('Missing runtime.science_packages')
@@ -72,7 +74,15 @@ def load(path, *, resolve_inputs=True):
     if len([m for m in models if m['split']=='development'])<3:raise ValueError('At least three development models required')
     for researcher in researchers:
         if researcher.get('prompt_file') and resolve_inputs and not Path(local(researcher['prompt_file'])).is_file():raise ValueError('Missing researcher prompt_file')
-        if researcher.get('harness') not in ['claude_code','mock']:raise ValueError('Supported researcher harnesses: claude_code, mock')
+        if researcher.get('harness') not in ['claude_code','codex','mock']:raise ValueError('Supported researcher harnesses: claude_code, codex, mock')
+        if researcher['harness']=='codex':
+            if not researcher.get('effort'):raise ValueError('Codex researcher requires a frozen effort')
+            limits=researcher.get('native_limits',{})
+            if set(limits)-{'max_context_tokens','max_output_tokens','timeout_seconds'}:raise ValueError('Unknown native model limit')
+            for key in ('max_context_tokens','max_output_tokens'):
+                if type(limits.get(key)) is not int or limits[key]<=0:raise ValueError('Codex researcher requires positive native_limits.'+key)
+            if limits['max_output_tokens']>131072:raise ValueError('Unsupported native output limit')
+            if 'timeout_seconds' in limits:positive(limits['timeout_seconds'],'native_limits.timeout_seconds')
         if researcher.get('prompt_file'):researcher['prompt_file']=local(researcher['prompt_file'])
     budgets=cfg.get('budgets',{})
     for name in ['researcher_usd','development_usd','evaluation_usd','suite_usd','item_usd']:positive(budgets.get(name),'budgets.'+name)
