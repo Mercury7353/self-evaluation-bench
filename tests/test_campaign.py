@@ -43,3 +43,34 @@ def test_concurrent_launch_claim_has_exactly_one_winner(tmp_path):
         except ValueError: return False
     with ThreadPoolExecutor(max_workers=6) as pool:
         assert sum(pool.map(claim, range(12))) == 1
+
+
+def test_joint_research_reuses_one_run_across_all_domains():
+    m = manifest()
+    m.update(research_unit='joint', run_allocation_ceiling_usd=14820)
+    m['budgets']['candidate_suite_usd'] = 30
+    rows = episodes(m)
+    assert len(rows) == 23
+    assert sum(r['kind'] == 'main' for r in rows) == 16
+    assert sum(r['kind'] == 'budget' for r in rows) == 4
+    assert sum(r['kind'] == 'baseline' for r in rows) == 3
+    assert all(r['domains'] == ['d0', 'd1', 'd2'] for r in rows)
+    assert all(r['evaluation_usd'] == 360 for r in rows)
+    assert sum(r['development_usd'] for r in rows) == 2540
+    assert sum(r['researcher_usd'] for r in rows) == 4000
+    assert sum(r['evaluation_usd'] for r in rows) == 8280
+    m['research_unit'] = 'unknown'
+    with pytest.raises(ValueError, match='Research unit'): episodes(m)
+
+
+def test_superseded_campaign_cannot_launch_but_preserves_existing_claims(tmp_path):
+    m = manifest(); reg = Registry(tmp_path, m)
+    rows = episodes(m)
+    reg.claim(rows[0]['id'], 'systemd:existing-preflight.service')
+    before = reg.inventory()
+    reg.suspend_launches('User replaced separate domain research with joint research')
+    again = Registry(tmp_path, m)
+    with pytest.raises(ValueError, match='suspended'):
+        again.claim(rows[1]['id'], 'systemd:must-not-start.service')
+    assert again.inventory() == before
+    assert (tmp_path / 'manifest.frozen.json').exists()

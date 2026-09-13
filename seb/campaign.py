@@ -38,6 +38,10 @@ def episodes(manifest):
     test_count = sum(m['split'] == 'holdout' for m in candidates)
     if not test_count:
         raise ValueError('No held-out candidates')
+    unit = manifest.get('research_unit', 'per_domain')
+    if unit not in ('per_domain', 'joint'):
+        raise ValueError('Research unit must be per_domain or joint')
+    groups = [{'id': 'joint'}] if unit == 'joint' else domains
     rows = []
     def add(kind, researcher, domain, development, designer):
         row = {'id': f'{kind}--{researcher}--{domain}--b{development:g}',
@@ -46,20 +50,22 @@ def episodes(manifest):
                'evaluation_usd': test_count * base['candidate_suite_usd'],
                'candidate_suite_usd': base['candidate_suite_usd'],
                'research_seconds': base['research_seconds']}
+        if unit == 'joint':
+            row['domains'] = [d['id'] for d in domains]
         rows.append(row)
     for researcher in ids:
-        for domain in domains:
+        for domain in groups:
             add('main', researcher, domain['id'], base['development_usd'], base['researcher_usd'])
     for researcher in manifest['budget_ablation']['researchers']:
         if researcher not in ids:
             raise ValueError('Ablation researcher must have a main condition')
-        for domain in domains:
+        for domain in groups:
             for budget in manifest['budget_ablation']['additional_development_usd']:
                 if budget == base['development_usd']:
                     raise ValueError('Middle budget reuses main; do not allocate it twice')
                 add('budget', researcher, domain['id'], budget, base['researcher_usd'])
     for baseline in manifest['baselines']:
-        for domain in domains:
+        for domain in groups:
             add('baseline', baseline, domain['id'], base['development_usd'], 0)
     if len(rows) != len({r['id'] for r in rows}):
         raise ValueError('Duplicate episode allocation')
@@ -114,6 +120,9 @@ class Registry:
             raise ValueError('A concrete supervisor handle is required')
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            suspended = db.execute("SELECT value FROM metadata WHERE key='launch_suspended'").fetchone()
+            if suspended:
+                raise ValueError('Campaign launch suspended: ' + suspended[0])
             row = db.execute('SELECT * FROM episodes WHERE id=?', (episode_id,)).fetchone()
             if not row:
                 raise ValueError('Unknown episode')
@@ -122,6 +131,14 @@ class Registry:
             db.execute("UPDATE episodes SET status='claimed',handle=?,claimed_at=? WHERE id=?",
                        (handle, time.time(), episode_id))
             return dict(row) | {'handle': handle, 'status': 'claimed'}
+
+    def suspend_launches(self, reason):
+        """Prevent further claims without modifying allocations, claims or ledgers."""
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError('A suspension reason is required')
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute("INSERT OR IGNORE INTO metadata VALUES ('launch_suspended',?)", (reason,))
 
     def inventory(self):
         with self.connect() as db:

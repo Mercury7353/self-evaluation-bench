@@ -117,6 +117,14 @@ it never releases a claim merely because a process timestamp is old. Existing
 handles and artifacts must be inspected on resumption. This registry reserves
 allocation envelopes; actual API calls are metered by each run's ledger.
 
+A campaign manifest can set `research_unit: joint` to allocate one episode per
+researcher across its entire `domains` list. Its `candidate_suite_usd` is the
+whole-program cap. This changes allocation accounting only; the current domain
+runner still accepts one domain, so joint submissions and scoring require the
+joint execution implementation before launching these allocations. Use
+`Registry.suspend_launches(reason)` to retire an earlier campaign without
+rewriting its manifest, existing claims, supervisor handles, or API ledgers.
+
 `python -m seb.provider_probe --config PRIVATE_JSON --output PRIVATE_DIRECTORY`
 performs transport checks against an existing scoped allocation, preserving
 completed operation IDs and unknown charges. It sends ordinary `READY` requests,
