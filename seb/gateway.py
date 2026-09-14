@@ -49,6 +49,9 @@ def usage_from_wire(raw, streaming):
 
 
 def cost(usage, price):
+    if 'input_tokens_details' in usage:
+        from .native_responses import usage_cost
+        return usage_cost(usage, price)
     # Conservatively charge cached input at standard input, and cache creation
     # at the most expensive published write multiplier. Never double-discount.
     if 'input_tokens' in usage:
@@ -57,7 +60,10 @@ def cost(usage, price):
         i += usage.get('cache_creation_input_tokens', 0) * price.get('cache_write_multiplier', 2)
         o = usage.get('output_tokens', 0)
     elif 'prompt_tokens' in usage:
-        i, o = usage['prompt_tokens'], usage.get('completion_tokens', 0)
+        from .usage import chat_output_tokens
+        i, o = usage['prompt_tokens'], chat_output_tokens(usage)
+        if o is None:
+            return None
         context_tokens = i
     else:
         return None
@@ -67,7 +73,17 @@ def cost(usage, price):
             o * price['output'] * (long.get('output_multiplier', 1) if expensive else 1)) / 1_000_000
 
 
+def validate_model_route(body):
+    # Provider routing options may override `model` and its allowlist/price.
+    # These require a separately specified system and accounting contract.
+    if not isinstance(body, dict):
+        raise ValueError('Request body must be an object')
+    if any(field in body for field in ('models', 'fallbacks')):
+        raise ValueError('Provider model lists and fallbacks are outside the frozen model route')
+
+
 def reservation(body, price):
+    validate_model_route(body)
     # Deliberately conservative UTF-8 byte bound + envelope; no multimodal input
     # is admitted under this text-only MVP accounting contract.
     def inspect(x):
@@ -104,6 +120,12 @@ def reservation(body, price):
 
 def create_app(config):
     policy_for(config)  # Fail invalid new protocols before creating wallets.
+    if config.get('response_cache'):
+        from .response_cache import validate_config
+        if not policy_for(config):raise ValueError('Response cache requires the metered candidate policy')
+        config['response_cache']=validate_config(config['response_cache'],[
+            config.get('base_root'),config.get('science_packages'),
+            *[e.get('workspace') for e in config['tokens'].values()]])
     root = Path(config['artifacts'])
     root.mkdir(parents=True, exist_ok=True)
     ledger = Ledger(root / 'ledger.sqlite')
@@ -119,6 +141,9 @@ def create_app(config):
     def access(request):
         token = request.headers.get('x-api-key') or request.headers.get('authorization', '').removeprefix('Bearer ')
         return config['tokens'].get(token)
+
+    from .native_responses import install_routes
+    install_routes(app, config, ledger, access)
 
     @app.get('/health')
     async def health():
@@ -136,11 +161,15 @@ def create_app(config):
     async def proxy(request: Request):
         entry = access(request)
         if not entry: return JSONResponse({'error': 'Unauthorized'}, 401)
+        if entry.get('native_responses'):
+            return JSONResponse({'error': 'Use the frozen native Responses researcher route'}, 403)
         if time.time()>=entry.get('deadline_epoch',float('inf')):
-            return JSONResponse({'error':{'type':'deadline_exceeded','message':'The execution deadline has passed'}},409)
+            from .limit_events import deadline_response
+            return deadline_response(config,entry)
         raw_request = await request.body()
         try:
             body = json.loads(raw_request)
+            validate_model_route(body)
             model = body['model']
             if model not in entry['models'] or model not in config['prices']:
                 return JSONResponse({'error': 'Model not allowed for this wallet'}, 403)
@@ -151,9 +180,12 @@ def create_app(config):
             if policy_for(config, entry) and not counting:
                 output_limit(config, body.get('max_tokens', body.get('max_completion_tokens')), entry)
                 for field,value in config.get('frozen_request_parameters',{}).get(model,{}).items():
+                    if field == 'model':
+                        raise ValueError('Frozen request parameters cannot override the model route')
                     if field in body and body[field]!=value:
                         raise ValueError('Request conflicts with frozen parameter: '+field)
                     body[field]=value
+                validate_model_route(body)
             amount = 0 if counting else reservation(body, price)
         except (ValueError, KeyError, TypeError) as e:
             return JSONResponse({'error': str(e)}, 400)
@@ -163,7 +195,8 @@ def create_app(config):
             request_key = Path(backend['key_file']).read_text().strip() if backend.get('key_file') else key
             async def execute():
                 if time.time()>=entry.get('deadline_epoch',float('inf')):
-                    return JSONResponse({'error':{'type':'deadline_exceeded','message':'The execution deadline has passed'}},409)
+                    from .limit_events import deadline_response
+                    return deadline_response(config,entry)
                 return await metered_request(request, body, raw_request, config, entry, ledger,
                                              amount=amount, price=price, backend=backend, key=request_key)
             limit=config.get('request_concurrency_per_model')

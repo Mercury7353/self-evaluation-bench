@@ -89,6 +89,12 @@ def test_extra_paid_features_are_not_silently_unbudgeted():
         with pytest.raises(ValueError):reservation({'max_tokens':100,**extra},price)
 
 
+def test_provider_route_overrides_have_no_single_model_reservation():
+    for extra in ({'models':['other']}, {'fallbacks':'default'}, {'fallbacks':[{'model':'other'}]}):
+        with pytest.raises(ValueError, match='frozen model route'):
+            reservation({'model':'allowed','max_tokens':100,**extra},{'input':1,'output':1})
+
+
 def test_researcher_alias_routes_to_provider_model(tmp_path):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from threading import Thread
@@ -121,6 +127,35 @@ def test_cache_estimate_does_not_change_conservative_budget_charge():
     assert cost(usage,price)==pytest.approx(.0021)
     assert cache_adjusted_cost(usage,price)==pytest.approx(.00048)
     assert cache_adjusted_cost(usage,{'input':2,'output':10}) is None
+
+
+@pytest.mark.parametrize('usage,expected', [
+    ({'prompt_tokens':15,'completion_tokens':4,'total_tokens':260,
+      'completion_tokens_details':{'reasoning_tokens':241},'prompt_tokens_details':None},.0022275),
+    ({'prompt_tokens':109,'completion_tokens':23,'total_tokens':132,
+      'completion_tokens_details':{'reasoning_tokens':18}},.0003705),
+    ({'prompt_tokens':15,'completion_tokens':4,'total_tokens':19,
+      'completion_tokens_details':None},.0000585),
+])
+def test_chat_reasoning_usage_counts_actual_output_once(usage, expected):
+    from seb.billing import cache_adjusted_cost
+    price={'input':1.5,'output':9}
+    assert cost(usage,price)==pytest.approx(expected)
+    assert cache_adjusted_cost(usage,price)==pytest.approx(expected)
+
+
+@pytest.mark.parametrize('extra', [
+    {'completion_tokens_details':{'reasoning_tokens':241}},
+    {'total_tokens':999,'completion_tokens_details':{'reasoning_tokens':241}},
+    {'total_tokens':19,'completion_tokens_details':{'reasoning_tokens':241}},
+    {'total_tokens':19.5}, {'completion_tokens':-1},
+])
+def test_ambiguous_chat_usage_keeps_cost_unknown(extra):
+    from seb.billing import cache_adjusted_cost
+    usage={'prompt_tokens':15,'completion_tokens':4,**extra}
+    price={'input':1.5,'output':9}
+    assert cost(usage,price) is None
+    assert cache_adjusted_cost(usage,price) is None
 
 
 def test_expired_wallet_does_not_call_provider(tmp_path):

@@ -92,6 +92,8 @@ def test_three_transient_retries_charge_each_attempt_and_replay_after_restart(pr
 
 @pytest.mark.parametrize('response', [answer('wrong'),answer(''),answer('', 'max_tokens'),
     (400,b'{"error":{"type":"invalid_request_error"}}',{}),
+    (500,json.dumps({'error':{'type':'api_error','message':json.dumps([{'error':{
+        'code':400,'status':'INVALID_ARGUMENT','message':'Function call is missing a thought_signature'}}])}}).encode(),{}),
     (401,b'{"error":{"type":"authentication_error"}}',{}),
     (429,b'{"error":{"type":"insufficient_quota"}}',{})])
 def test_noninfra_and_model_failures_never_retry(provider,response):
@@ -117,6 +119,66 @@ def test_output_floor_rejected_before_api_or_charge(provider):
         for bad in (2048,16384,True,131073): assert post(client,max_tokens=bad).status_code==400
     assert not server.bodies
     assert Ledger(config['artifacts']+'/ledger.sqlite').status()[0]['calls']==0
+
+
+@pytest.mark.parametrize('total,expected', [(260,.0022275),(999,None)])
+def test_chat_reasoning_charge_or_unknown_persists_without_repeating(provider,total,expected):
+    server,config=provider
+    config['prices']['c01']={'input':1.5,'output':9}
+    usage={'prompt_tokens':15,'completion_tokens':4,'total_tokens':total,
+           'completion_tokens_details':{'reasoning_tokens':241}}
+    payload={'model':'secret-model','choices':[{'message':{'content':'1591'},'finish_reason':'stop'}],
+             'usage':usage}
+    server.responses=[(200,json.dumps(payload).encode(),{'Content-Type':'application/json'})]
+    with TestClient(create_app(config)) as client:
+        for _ in range(2):
+            response=client.post('/v1/openai/chat/completions',
+                json={'model':'c01','max_tokens':32768,'messages':[{'role':'user','content':'probe'}]},
+                headers={'x-api-key':'token','x-seb-operation-id':'chat-reasoning'})
+            assert response.status_code==200
+    assert len(server.bodies)==1
+    with Ledger(config['artifacts']+'/ledger.sqlite').connect() as db:
+        row=db.execute('SELECT * FROM calls').fetchone()
+    assert json.loads(row['usage'])==usage
+    if expected is None:
+        assert row['charged'] is None and row['reserve']>0
+    else:
+        assert row['charged']==pytest.approx(expected)
+
+
+@pytest.mark.parametrize('policy_enabled', [True, False])
+@pytest.mark.parametrize('path', ['/anthropic/v1/messages',
+                                 '/anthropic/v1/messages/count_tokens',
+                                 '/v1/openai/chat/completions'])
+def test_provider_routes_cannot_override_candidate_or_budget(provider, policy_enabled, path):
+    server, config = provider
+    if not policy_enabled:
+        config.pop('evaluation_policy')
+    body = {'model':'c01', 'max_tokens':32768, 'messages':[]}
+    with TestClient(create_app(config)) as client:
+        for extra in ({'models':['unlisted-expensive-model']},
+                      {'models':['c01','unlisted-expensive-model']},
+                      {'fallbacks':[{'model':'unlisted-expensive-model'}]},
+                      {'fallbacks':'default'}, {'models':None}):
+            result = client.post(path, json=body | extra, headers={'x-api-key':'token'})
+            assert result.status_code == 400
+            assert 'frozen model route' in result.json()['error']
+    assert server.bodies == []
+    assert Ledger(config['artifacts']+'/ledger.sqlite').status()[0]['calls'] == 0
+
+
+@pytest.mark.parametrize('parameters', [
+    {'model':'different-candidate'}, {'models':['unlisted-expensive-model']},
+    {'fallbacks':'default'},
+])
+def test_frozen_parameters_cannot_inject_a_different_route(provider, parameters):
+    server, config = provider
+    config['frozen_request_parameters']={'c01':parameters}
+    with TestClient(create_app(config)) as client:
+        result=post(client)
+        assert result.status_code == 400
+    assert server.bodies == []
+    assert Ledger(config['artifacts']+'/ledger.sqlite').status()[0]['calls'] == 0
 
 
 def test_retry_stops_at_original_budget(provider):

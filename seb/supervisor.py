@@ -20,11 +20,12 @@ def run_jobs(config,token,models,path,output,deadline,*,pilot=False):
             if time.time()>=deadline:raise TimeoutError('No new submission after deadline')
             job=request(config['gateway_socket'],token,'/research/suites',{'path':path,'model':model,'pilot':pilot})
             write(marker,job)
-        while time.time()<deadline:
+        while True:
             result=request(config['gateway_socket'],token,'/research/jobs/'+job['id'])
             if result['status'] not in ('queued','running'):
                 return {'model':model,'job_id':job['id'],**result}
-            time.sleep(2)
+            if time.time()>=deadline:break
+            time.sleep(min(2,max(0,deadline-time.time())))
         return {'model':model,'job_id':job['id'],'status':'incomplete','score_status':'incomplete','reason':'deadline'}
     with ThreadPoolExecutor(max_workers=config.get('suite_concurrency',4)) as pool:
         pending={pool.submit(trial,m):m for m in models}
@@ -55,7 +56,19 @@ def stop_gateway(process):
         try:process.wait(timeout=30)
         except subprocess.TimeoutExpired:process.kill();process.wait()
 
-def check_designer_exit(trace, returncode):
+def check_designer_exit(trace, returncode, *, harness='claude_code'):
+    if harness=='codex':
+        path=Path(trace)/'codex.stdout'
+        events=[]
+        if path.exists():
+            for line in path.read_text().splitlines():
+                try:events.append(json.loads(line))
+                except ValueError:pass
+        failed=any(e.get('type') in ('turn.failed','error') for e in events)
+        completed=any(e.get('type')=='turn.completed' for e in events)
+        if failed or returncode != 0 or not completed:
+            raise RuntimeError(f'Codex researcher exited {returncode}; inspect the native SDK trace')
+        return
     result = {}
     path = Path(trace)/'claude.stdout'
     if path.exists():
@@ -63,7 +76,7 @@ def check_designer_exit(trace, returncode):
             try: event = json.loads(line)
             except ValueError: continue
             if event.get('type') == 'result': result = event
-    if returncode not in (0, 124) or result.get('is_error'):
+    if returncode != 0 or result.get('is_error'):
         raise RuntimeError(f'Designer exited {returncode}: ' + str(result.get('result', 'see designer trace'))[:2000])
 
 

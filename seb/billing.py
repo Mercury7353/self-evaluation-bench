@@ -3,13 +3,16 @@ from .gateway import cost
 
 
 def cache_adjusted_cost(usage, price):
+    if 'input_tokens_details' in usage:
+        from .native_responses import usage_cost
+        return usage_cost(usage, price, cached=True)
     conservative=cost(usage,price)
     if conservative is None:return None
     if 'input_tokens' in usage:
         cached=usage.get('cache_read_input_tokens',0)
         context=usage.get('input_tokens',0)+cached+usage.get('cache_creation_input_tokens',0)
     else:
-        cached=usage.get('prompt_tokens_details',{}).get('cached_tokens',0)
+        cached=(usage.get('prompt_tokens_details') or {}).get('cached_tokens') or 0
         context=usage.get('prompt_tokens',0)
     if not cached:return conservative
     # Unknown discount remains unknown, not silently promoted to an invoice estimate.

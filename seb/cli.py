@@ -186,8 +186,15 @@ def main():
     x=sub.add_parser('experiment');xs=x.add_subparsers(dest='experiment_command',required=True)
     xv=xs.add_parser('validate');xv.add_argument('--config',required=True)
     xr=xs.add_parser('run');xr.add_argument('--config',required=True);xr.add_argument('--researcher');xr.add_argument('--output',required=True);xr.add_argument('--mock',action='store_true')
+    baseline=sub.add_parser('baseline');baseline.add_argument('submission');baseline.add_argument('--config',required=True)
+    baseline.add_argument('--campaign',required=True);baseline.add_argument('--episode',required=True)
+    baseline.add_argument('--handle',required=True);baseline.add_argument('--mock',action='store_true')
     a=p.parse_args()
-    if a.command=='experiment':
+    if a.command=='baseline':
+        from .campaign import run_baseline_episode
+        result=run_baseline_episode(a.campaign,a.episode,a.config,a.submission,a.handle,mock=a.mock)
+        print(json.dumps(result,indent=2));raise SystemExit(0 if result['eligible'] else 2)
+    elif a.command=='experiment':
         from .experiment_config import load,describe
         if a.experiment_command=='validate':print(json.dumps(describe(load(a.config)),indent=2))
         else:

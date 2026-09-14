@@ -10,8 +10,9 @@ class BudgetExceeded(Exception):
 
 class Ledger:
     def __init__(self, path):
-        self.path = str(path)
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        # All aliases of a shared ledger must use the same SQLite journal path.
+        self.path = str(Path(path).resolve())
+        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
             db.executescript('''
             CREATE TABLE IF NOT EXISTS wallets(name TEXT PRIMARY KEY, cap REAL);
@@ -21,6 +22,9 @@ class Ledger:
             CREATE TABLE IF NOT EXISTS budget_scopes(id TEXT PRIMARY KEY, wallet TEXT, cap REAL);
             CREATE TABLE IF NOT EXISTS call_budget_scopes(call_id TEXT, scope TEXT,
               PRIMARY KEY(call_id, scope));
+            CREATE TABLE IF NOT EXISTS cache_replays(call_id TEXT PRIMARY KEY,
+              cache_key TEXT NOT NULL, source_call_id TEXT NOT NULL,
+              source_ledger TEXT NOT NULL, response_sha256 TEXT NOT NULL);
             ''')
 
     def connect(self):
@@ -68,11 +72,26 @@ class Ledger:
             db.execute('UPDATE calls SET charged=?,usage=?,state=?,finished=? WHERE id=?',
                        (charge, json.dumps(usage), state, time.time(), call_id))
 
+    def finish_cached(self, call_id, charge, usage, record):
+        """Settle equivalent quota and zero-provider-cost provenance atomically."""
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT state,reserve FROM calls WHERE id=?', (call_id,)).fetchone()
+            if not row or row['state'] != 'reserved' or not 0 <= charge <= row['reserve'] + 1e-9:
+                raise ValueError('Cached settlement requires a fresh adequate reservation')
+            db.execute('UPDATE calls SET charged=?,usage=?,state=?,finished=? WHERE id=?',
+                (charge, json.dumps(usage), 'completed', time.time(), call_id))
+            db.execute('INSERT INTO cache_replays VALUES(?,?,?,?,?)', (call_id, record['key'],
+                record['source_call_id'], record['source_ledger'], record['response_sha256']))
+
     def status(self, wallet=None):
         with self.connect() as db:
             wallets = db.execute('SELECT * FROM wallets' + (' WHERE name=?' if wallet else ''), (wallet,) if wallet else ()).fetchall()
             out = []
             for w in wallets:
                 row = db.execute('SELECT COUNT(*) AS calls, COALESCE(SUM(charged),0) AS charged, COALESCE(SUM(CASE WHEN charged IS NULL THEN reserve ELSE 0 END),0) AS outstanding FROM calls WHERE wallet=?', (w['name'],)).fetchone()
-                out.append(dict(w) | dict(row))
+                cached = db.execute('SELECT COUNT(*) AS hits, COALESCE(SUM(c.charged),0) AS equivalent FROM calls c JOIN cache_replays r ON c.id=r.call_id WHERE c.wallet=?', (w['name'],)).fetchone()
+                out.append(dict(w) | dict(row) | {'equivalent_charge_usd':row['charged'],
+                    'provider_metered_usd':row['charged']-cached['equivalent'],
+                    'response_cache_hits':cached['hits']})
             return out

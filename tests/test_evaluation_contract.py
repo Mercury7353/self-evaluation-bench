@@ -73,6 +73,45 @@ def test_manifest_preserves_hundred_item_contract(tmp_path):
     with pytest.raises(ValueError,match='at least 100'):load_manifest(tmp_path)
 
 
+def test_joint_domains_reuse_items_and_preserve_distinct_scores(case):
+    case[0]['domain_aggregations']={
+        'coding':{'kind':'weighted_mean','weights':{'a':1}},
+        'co-work':{'kind':'weighted_mean','weights':{'b':1}},
+        'reasoning':{'kind':'weighted_mean','weights':{'a':1,'b':1}}}
+    before=case[2].status('w')[0]
+    result=normalize(case)
+    assert result['domain_scores']=={'coding':1,'co-work':0,'reasoning':.5}
+    assert set(result['domain_score_status'].values())=={'valid'}
+    assert case[2].status('w')[0]==before
+    case[1]['domain_scores']={'co-work':1}
+    with pytest.raises(ValueError,match='frozen weights'):normalize(case)
+
+
+def test_joint_missing_custom_output_is_not_zero_and_infra_cannot_be_hidden(case):
+    case[0]['domain_aggregations']={
+        'coding':{'kind':'custom','items':['a'],'method':'frozen custom rule'},
+        'co-work':{'kind':'weighted_mean','weights':{'b':1}}}
+    result=normalize(case)
+    assert result['domain_scores']['coding'] is None
+    assert result['domain_score_status']['coding']=='missing_or_invalid'
+    case[1]['domain_scores']={'coding':.75}
+    case[1]['items'][1].update(execution_status='infra_error',answer_status='not_applicable',score=None)
+    result=normalize(case)
+    assert result['domain_scores']=={'coding':.75,'co-work':None}
+    assert result['domain_score_status']=={'coding':'valid','co-work':'incomplete'}
+
+
+def test_joint_manifest_requires_all_domains_but_allows_subset_pilots(tmp_path):
+    data={'protocol_version':1,'aggregation':{'kind':'weighted_mean'},'items':[{'id':'one'}],
+          'domain_aggregations':{'coding':{'kind':'weighted_mean','weights':{'one':1}}}}
+    path=tmp_path/'evaluation.json';path.write_text(json.dumps(data))
+    assert load_manifest(tmp_path,1)['domain_aggregations']==data['domain_aggregations']
+    with pytest.raises(ValueError,match='every required domain'):
+        load_manifest(tmp_path,1,domains=['coding','co-work','reasoning'])
+    data['domain_aggregations']['coding']['weights']={'undeclared':1};path.write_text(json.dumps(data))
+    with pytest.raises(ValueError,match='declared items'):load_manifest(tmp_path,1)
+
+
 def test_researcher_info_does_not_expose_hidden_pool_prices_or_targets(tmp_path):
     key=tmp_path/'key';key.write_text('secret')
     config={'key_file':str(key),'artifacts':str(tmp_path/'gateway'),'evaluation_policy':DEFAULT_POLICY,

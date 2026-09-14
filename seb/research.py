@@ -34,7 +34,8 @@ def scoped_cost(config,scope):
     """Exact trial attribution, including nested agents, without wallet deltas."""
     root=Path(config['artifacts']);ledger=Ledger(root/'ledger.sqlite')
     summary={'charged_usd':0.,'outstanding_reserved_usd':0.,'calls':0,
-             'rejected_requests':0,'cost_complete':True,'usage_by_model':{},'pending_jobs':[]}
+             'rejected_requests':0,'cost_complete':True,'usage_by_model':{},'pending_jobs':[],
+             'provider_metered_usd':0.,'response_cache_hits':0,'equivalent_usage_by_model':{}}
     with ledger.connect() as db:
         for marker in (root/'scopes'/scope).glob('*'):
             if not marker.is_file():continue
@@ -46,13 +47,19 @@ def scoped_cost(config,scope):
                 else:summary['cost_complete']=False
                 continue
             summary['calls']+=1
+            replay=db.execute('SELECT 1 FROM cache_replays WHERE call_id=?',(marker.name,)).fetchone()
+            if replay:summary['response_cache_hits']+=1
             if row['charged'] is None:
                 summary['outstanding_reserved_usd']+=row['reserve'];summary['cost_complete']=False
-            else:summary['charged_usd']+=row['charged']
+            else:
+                summary['charged_usd']+=row['charged']
+                if not replay:summary['provider_metered_usd']+=row['charged']
             usage=json.loads(row['usage']) if row['usage'] else {}
-            per_model=summary['usage_by_model'].setdefault(row['model'],{})
-            for key,value in usage.items():
-                if isinstance(value,(int,float)) and not isinstance(value,bool):per_model[key]=per_model.get(key,0)+value
+            for name in ['equivalent_usage_by_model']+([] if replay else ['usage_by_model']):
+                per_model=summary[name].setdefault(row['model'],{})
+                for key,value in usage.items():
+                    if isinstance(value,(int,float)) and not isinstance(value,bool):per_model[key]=per_model.get(key,0)+value
+    summary['equivalent_charge_usd']=summary['charged_usd']
     for marker in (root/'scopes'/scope/'jobs').glob('*'):
         result_path=root.parent/'research-jobs'/marker.name/'result.json'
         try:status=json.loads(result_path.read_text()).get('status')
@@ -116,7 +123,8 @@ def run_suite(source,model,token,config,output,entry):
     try:
         before=validate_submission(source)
         protocol=policy_for(config,entry)
-        manifest=load_manifest(source,entry.get('minimum_items',config.get('minimum_items',100))) if protocol else None
+        manifest=load_manifest(source,entry.get('minimum_items',config.get('minimum_items',100)),
+            domains=None if entry.get('_pilot') else config.get('joint_domains')) if protocol else None
         work=output/'workspace';shutil.copytree(source,work)
         if digest_tree(work)!=before:raise ValueError('Submission changed while snapshotting')
         (output/'submission.sha256.json').write_text(json.dumps(before,indent=2))
@@ -124,7 +132,8 @@ def run_suite(source,model,token,config,output,entry):
         # The entry's workspace is resolved by the server, never sent by a client.
         child_token=uuid.uuid4().hex
         child_entry={k:v for k,v in entry.items() if k not in ('workspace','research','_active_workspace')}
-        child_entry.update(workspace=str(work),research=False,allow_suite=False,models=list(dict.fromkeys([model]+config.get('auxiliary_models',[]))),
+        child_entry.update(workspace=str(work),research=False,allow_suite=False,
+                           candidate_models=[model],models=list(dict.fromkeys([model]+config.get('auxiliary_models',[]))),
                            trace_scopes=list(dict.fromkeys(entry.get('trace_scopes',[])+[scope])))
         if config.get('require_item_budgets'):
             child_entry.update(budget_scopes={**entry.get('budget_scopes',{}),
@@ -132,10 +141,11 @@ def run_suite(source,model,token,config,output,entry):
                                item_scope_prefix='item:'+scope+':',allowed_item_ids=list({i.get('budget_group',i['id']) for i in manifest['items']}))
         config['tokens'][child_token]=child_entry
         context={'model':model,'token':child_token,'base_url':'http://127.0.0.1:18765',
-                 'output_dir':'/workspace/raw','efforts':config.get('efforts',{}),'budget_usd':entry['cap']}
+                 'output_dir':'/workspace/raw',
+                 'efforts':{m:config.get('efforts',{}).get(m) for m in child_entry['models']},'budget_usd':entry['cap']}
         if protocol:
-            context.update(public_contract(config,entry),execution_id=scope,seed=config.get('evaluation_seed',0),
-                           submission_sha256=before,efforts={model:config.get('efforts',{}).get(model)})
+            context.update(public_contract(config,child_entry),execution_id=scope,seed=config.get('evaluation_seed',0),
+                           submission_sha256=before)
         ctx=output/'context.private.json';ctx.write_text(json.dumps(context));ctx.chmod(0o600)
         command=['/usr/local/bin/python','/workspace/run.py','--context','/run/context.json','--output','/workspace/result.json']
         launch=output/'launch.private.json';launch.write_text(json.dumps({'command':command,'cwd':'/workspace','env':{'SEB_CONTEXT':'/run/context.json','PYTHONPATH':'/opt:/opt/science'}}));launch.chmod(0o600)
@@ -151,7 +161,7 @@ def run_suite(source,model,token,config,output,entry):
         result=json.loads((work/'result.json').read_text())
         ledger=Ledger(Path(config['artifacts'])/'ledger.sqlite')
         if protocol:
-            result=normalize_result(result,manifest,ledger,entry['wallet'],started,Path(config['artifacts']).parent/'research-jobs')
+            result=normalize_result(result,manifest,ledger,entry['wallet'],started,Path(config['artifacts']).parent/'research-jobs',candidate_model=model)
             if config.get('require_item_budgets'):
                 from .evidence import check_budget_evidence
                 check_budget_evidence(result,manifest,ledger,scope,Path(config['artifacts']).parent/'research-jobs')
@@ -187,12 +197,15 @@ def research_app(config):
         return token,config['tokens'].get(token)
     def workspace(entry):
         return entry.get('_active_workspace') or entry.get('workspace') or config.get('workspace')
+    def candidates(entry):
+        return [m for m in entry.get('candidate_models',entry['models'])
+                if m in entry['models'] and m not in config.get('auxiliary_models',[])]
 
     @app.get('/research/info')
     async def info(request:Request):
         token,entry=access(request)
         if not entry:return JSONResponse({'error':'Unauthorized'},401)
-        return {'models':entry['models'],'contract':public_contract(config,entry),
+        return {'models':candidates(entry),'contract':public_contract(config,entry),
                 'efforts':{m:config.get('efforts',{}).get(m) for m in entry['models']}}
 
     @app.post('/research/feedback')
@@ -216,6 +229,8 @@ def research_app(config):
             entry['deadline_epoch']=time.time()+entry['start_deadline_on_first_suite']
         try:
             if time.time()>=entry.get('deadline_epoch',float('inf')):raise ValueError('The wallet execution deadline has passed')
+            from .response_cache import sample_path
+            entry=dict(entry,cache_sample_path=sample_path(entry,data.get('sample_id')))
             agent_scopes=dict(entry.get('budget_scopes',{}))
             if kind=='agent' and config.get('require_item_budgets'):
                 item_id=request.headers.get('x-seb-item-id')
@@ -238,14 +253,15 @@ def research_app(config):
             output_tokens=output_limit(config,data.get('max_output_tokens'),entry)
             if 'max_output_tokens' in data and kind!='agent':raise ValueError('max_output_tokens applies to agent tasks only')
             model=data['model']
-            if model not in entry['models']:raise ValueError('Model not allowed')
+            if model not in candidates(entry):raise ValueError('Candidate model not allowed for suite/agent execution')
             rel=str(data['path'])
             if rel.startswith('/workspace/'):rel=rel[len('/workspace/'):]
             elif rel.startswith('/'):raise ValueError('Use a workspace-relative path')
             path=safe_path(workspace(entry),rel)
             if kind=='suite':
                 validate_submission(path)
-                if policy_for(config,entry):load_manifest(path,1 if pilot else config.get('minimum_items',100))
+                if policy_for(config,entry):load_manifest(path,1 if pilot else config.get('minimum_items',100),
+                    domains=None if pilot else config.get('joint_domains'))
             else:
                 from harbor.models.task.task import Task
                 digest_tree(path);Task(path)
@@ -256,6 +272,7 @@ def research_app(config):
         submission_id=hashlib.sha256(json.dumps(digest_tree(snapshot),sort_keys=True).encode()).hexdigest()
         (out/'request.json').write_text(json.dumps({'kind':kind,'model':model,'wallet':entry['wallet'],'created':time.time(),'path':str(path),
                                                   'submission_id':submission_id,'pilot':pilot,
+                                                  'cache_sample_path':entry['cache_sample_path'],
                                                   **({'budget_scopes':agent_scopes} if kind=='agent' and config.get('require_item_budgets') else {}),
                                                   'candidate_output_tokens':output_tokens if kind=='agent' else None}))
         write_json(out/'result.json',{'id':ident,'status':'queued','queued_at':time.time(),'submission_id':submission_id})
@@ -269,10 +286,10 @@ def research_app(config):
                 async with lock:
                     write_json(out/'result.json',{'id':ident,'status':'running','started':time.time(),'submission_id':submission_id})
                     if kind=='suite':result=await asyncio.to_thread(run_suite,snapshot,model,token,config,out/'execution',
-                        dict(entry,minimum_items=1) if pilot else entry)
+                        dict(entry,minimum_items=1,_pilot=True) if pilot else entry)
                     else:
                         agent_token=uuid.uuid4().hex
-                        config['tokens'][agent_token]=dict(entry,research=False,allow_suite=False,models=[model],
+                        config['tokens'][agent_token]=dict(entry,research=False,allow_suite=False,models=[model],candidate_models=[model],
                             trace_scopes=list(dict.fromkeys(entry.get('trace_scopes',[])+[ident])))
                         if config.get('require_item_budgets'):
                             config['tokens'][agent_token]['budget_scopes']=agent_scopes

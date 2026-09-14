@@ -30,12 +30,13 @@ class Client:
         self.artifacts=Path(self.context.get('output_dir','/workspace/client-artifacts'))
         self.artifacts.mkdir(parents=True,exist_ok=True)
 
-    def request(self,path,data=None,timeout=None,operation_id=None,item_id=None):
+    def request(self,path,data=None,timeout=None,operation_id=None,item_id=None,sample_id=None):
         timeout=timeout or self.context.get('client_timeout_seconds',650)
         payload=None if data is None else json.dumps(data).encode()
         headers={'x-api-key':self.token,'Content-Type':'application/json'}
         if operation_id:headers['x-seb-operation-id']=operation_id
         if item_id is not None:headers['x-seb-item-id']=str(item_id)
+        if sample_id is not None:headers['x-seb-sample-id']=sample_id
         req=urllib.request.Request(self.base+path,data=payload,headers=headers)
         try:
             with urllib.request.urlopen(req,timeout=timeout) as r:
@@ -57,7 +58,7 @@ class Client:
     def feedback(self,job_ids):
         return json.loads(self.request('/research/feedback',{'job_ids':job_ids},timeout=7200)[0])
 
-    def chat(self,prompt,*,model=None,max_tokens=None,system=None,messages=None,operation_id=None,item_id=None):
+    def chat(self,prompt,*,model=None,max_tokens=None,system=None,messages=None,operation_id=None,item_id=None,sample_id=None):
         model=model or self.context.get('model')
         if not model:raise ValueError('Specify a model or use the evaluation context model')
         policy=self.context.get('evaluation_policy')
@@ -72,7 +73,7 @@ class Client:
         if not all(c.isalnum() or c in '_-' for c in operation_id) or not 1<=len(operation_id)<=128:
             raise ValueError('Invalid operation ID')
         (self.artifacts/(operation_id+'.request.json')).write_text(json.dumps(body))
-        raw,headers=self.request('/anthropic/v1/messages',body,operation_id=operation_id,item_id=item_id)
+        raw,headers=self.request('/anthropic/v1/messages',body,operation_id=operation_id,item_id=item_id,sample_id=sample_id)
         data=json.loads(raw);call_id=headers.get('x-seb-request-id')
         if not call_id:raise RuntimeError('Gateway did not supply an evidence ID')
         (self.artifacts/(call_id+'.response.json')).write_bytes(raw)
@@ -84,8 +85,10 @@ class Client:
     def item(self,item_id,prompt,grader,**kwargs):
         """Run once through platform retry policy, then grade once; no answer retries.
 
-        grader(text) returns a score in [0,1], or a dict with score and answer_status
-        (e.g. invalid). Grader exceptions propagate as program defects, not wrong answers.
+        grader(text) returns a score in [0,1], or a dict with score, answer_status
+        and an optional evidence list. Helper calls must use the same item/budget group.
+        A grader API failure leaves the item incomplete without retrying its answer;
+        other grader exceptions propagate as program defects, not wrong answers.
         """
         try:
             reply=self.chat(prompt,item_id=item_id,**kwargs)
@@ -94,14 +97,27 @@ class Client:
                        'budget_exhausted' if error.category=='budget_exceeded' else 'not_run')
             return {'id':item_id,'score':None,'execution_status':execution,'answer_status':'not_applicable',
                     'evidence':error.evidence,'operation_id':error.operation_id,'error_category':error.category}
-        graded=grader(reply['text']) if reply['text'].strip() else {'score':0,'answer_status':'missing'}
+        try:
+            graded=grader(reply['text']) if reply['text'].strip() else {'score':0,'answer_status':'missing'}
+        except EvaluationError as error:
+            execution=('infra_error' if error.category=='infra_error' else
+                       'budget_exhausted' if error.category=='budget_exceeded' else 'not_run')
+            return {'id':item_id,'score':None,'execution_status':execution,'answer_status':'not_applicable',
+                    'evidence':[reply['evidence'],*error.evidence],'error_stage':'grading',
+                    'answer_operation_id':reply['operation_id'],'operation_id':error.operation_id,
+                    'error_category':error.category}
         if not isinstance(graded,dict):graded={'score':graded,'answer_status':'answered'}
-        return {'id':item_id,**graded,'execution_status':'completed','evidence':[reply['evidence']],
+        extra=graded.get('evidence',[])
+        if not isinstance(extra,list):raise ValueError('Grader evidence must be a list')
+        if graded.get('execution_status','completed')!='completed':
+            raise ValueError('Return incomplete items explicitly; a grader result must be completed')
+        return {**graded,'id':item_id,'execution_status':'completed','evidence':[reply['evidence'],*extra],
                 'finish_reason':reply['finish_reason'],'operation_id':reply['operation_id'],
                 'attempt_count':reply['attempt_count']}
 
-    def submit(self,path,*,model=None,kind='suite',max_tokens=None,pilot=False,item_id=None):
+    def submit(self,path,*,model=None,kind='suite',max_tokens=None,pilot=False,item_id=None,sample_id=None):
         body={'path':str(path),'model':model or self.context.get('model')}
+        if sample_id is not None:body['sample_id']=sample_id
         if pilot:body['pilot']=True
         if max_tokens is not None:
             if kind!='agent':raise ValueError('max_tokens applies to agent tasks only')
@@ -134,11 +150,11 @@ class Client:
             time.sleep(2)
         raise TimeoutError('Job still running; poll the same ID, do not resubmit: '+job_id)
 
-    def agent(self,path,*,model=None,timeout=1800,max_tokens=None,item_id=None):
-        job=self.submit(path,model=model,kind='agent',max_tokens=max_tokens,item_id=item_id)
+    def agent(self,path,*,model=None,timeout=1800,max_tokens=None,item_id=None,sample_id=None):
+        job=self.submit(path,model=model,kind='agent',max_tokens=max_tokens,item_id=item_id,sample_id=sample_id)
         result=self.wait(job['id'],timeout=timeout)
         return {'result':result,'evidence':{'kind':'agent','id':job['id']}}
 
-    def suite(self,path,*,model,timeout=1800):
-        job=self.submit(path,model=model,kind='suite')
+    def suite(self,path,*,model,timeout=1800,sample_id=None):
+        job=self.submit(path,model=model,kind='suite',sample_id=sample_id)
         return self.wait(job['id'],timeout=timeout)
