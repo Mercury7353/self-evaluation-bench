@@ -95,10 +95,10 @@ class ResearchLifecycle:
             ledger = artifacts / 'ledger.sqlite'
             if ledger.exists():
                 with sqlite3.connect(f'file:{ledger}?mode=ro', uri=True) as db:
-                    wallet = db.execute("SELECT cap FROM wallets WHERE name='designer'").fetchone()
-                if wallet and wallet[0] == 0:
-                    self.reason = 'researcher_accounting_guard'
-                    self.evidence = {'ledger': str(ledger), 'wallet': 'designer', 'cap': 0}
+                    wallet = db.execute("SELECT name,cap FROM wallets WHERE name IN ('designer','development') AND cap=0 ORDER BY name").fetchone()
+                if wallet:
+                    self.reason = 'researcher_accounting_guard' if wallet[0]=='designer' else 'development_accounting_guard'
+                    self.evidence = {'ledger': str(ledger), 'wallet': wallet[0], 'cap': 0}
             rejected = []
             if not self.reason:
                 for kind in ('wire', 'native-wire'):

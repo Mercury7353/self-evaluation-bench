@@ -463,12 +463,13 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
                             'stop_requested':lifecycle.poll}
                         if researcher['harness']=='codex':
                             rc=launch_codex(root,work,trace,config['gateway_socket'],tokens['designer'],researcher['model'],prompt,
-                                binary=cfg['runtime'].get('codex_binary'),resume_thread=previous_session,**common)
+                                binary=cfg['runtime'].get('codex_binary'),resume_thread=previous_session,
+                                continuation_policy=cfg['design'].get('continuation'),**common)
                         else:
                             rc=launch_claude(root,work,trace,config['gateway_socket'],tokens['designer'],researcher['id'],prompt,
                                 resume_session=previous_session,**common)
                     research_outcome=lifecycle.finish(trace,rc,harness=researcher['harness'])
-                    if research_outcome['reason'] in ('upstream_blocked','researcher_accounting_guard'):
+                    if research_outcome['reason'] in ('upstream_blocked','researcher_accounting_guard','development_accounting_guard'):
                         raise RuntimeError('Research stopped: '+research_outcome['reason']+'; saved snapshots and ledger preserved')
                     if not mock and not research_outcome['expected_resource_stop']:
                         try:check_designer_exit(trace,rc,harness=researcher['harness'])

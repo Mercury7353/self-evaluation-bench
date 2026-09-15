@@ -126,6 +126,16 @@ def load(path, *, resolve_inputs=True):
     design=cfg.setdefault('design',{});design.setdefault('rounds',1);design.setdefault('seconds',3600);design.setdefault('minimum_items',1 if cfg.get('domain_protocol') else 100);design.setdefault('checkpoint_seconds',design['seconds'] if cfg.get('domain_protocol') else min(7200,design['seconds']))
     for k in ['rounds','seconds','minimum_items','checkpoint_seconds']:
         if type(design[k]) is not int or design[k]<1:raise ValueError('design.'+k+' must be a positive integer')
+    if 'continuation' in design:
+        policy=design['continuation']
+        if not isinstance(policy,dict) or set(policy)!={'reprompt_remaining_seconds','transport_retries'}:
+            raise ValueError('Invalid design.continuation fields')
+        if type(policy['reprompt_remaining_seconds']) is not int or not 1<=policy['reprompt_remaining_seconds']<=design['seconds']:
+            raise ValueError('Invalid reprompt threshold')
+        if type(policy['transport_retries']) is not int or not 0<=policy['transport_retries']<=5:
+            raise ValueError('Invalid transport retry count')
+        if any(r['harness']!='codex' for r in researchers):
+            raise ValueError('Continuation currently requires the Codex harness')
     if 'domain_protocol' in cfg:
         protocol=cfg['domain_protocol']
         if not isinstance(protocol,dict) or protocol.get('version') not in (1,2,3):

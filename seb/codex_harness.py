@@ -3,6 +3,7 @@ import hashlib
 import json
 import shutil
 import sys
+import time
 from pathlib import Path
 
 from .container import run_logged
@@ -18,7 +19,7 @@ def runtime_files(binary=None):
     return harness,binary
 
 
-def launch_codex(root, workspace, trace, gateway_socket, designer_token, model, prompt,
+def _launch_codex_once(root, workspace, trace, gateway_socket, designer_token, model, prompt,
                  *, timeout, effort, binary=None, resume_thread=None, extra_env=None, extra_binds=(), stop_requested=None):
     trace = Path(trace).resolve(); trace.mkdir(parents=True, exist_ok=True)
     workspace = Path(workspace).resolve()
@@ -61,3 +62,70 @@ def launch_codex(root, workspace, trace, gateway_socket, designer_token, model, 
     finally:
         private.unlink(missing_ok=True)
         (trace/'launch.private.json').unlink(missing_ok=True)
+
+
+def transport_failure(trace):
+    """Only terminal transport events qualify; never inspect model/tool prose."""
+    messages=[]
+    path=Path(trace)/'codex.stdout'
+    if path.exists():
+        for line in path.read_text().splitlines():
+            try:event=json.loads(line)
+            except ValueError:continue
+            if event.get('type')=='error':messages.append(event.get('message',''))
+            elif event.get('type')=='turn.failed':messages.append((event.get('error') or {}).get('message',''))
+    text=' '.join(messages).lower()
+    if any(x in text for x in ('policy','quota','unauthorized','authentication','budget','rate limit','403','401','429')):
+        return False
+    return any(x in text for x in ('stream disconnected','connection reset','connection closed','error decoding response body','network error'))
+
+
+def launch_codex(root, workspace, trace, gateway_socket, designer_token, model, prompt,
+                 *, timeout, effort, binary=None, resume_thread=None, extra_env=None,
+                 extra_binds=(), stop_requested=None, continuation_policy=None):
+    if not continuation_policy:
+        return _launch_codex_once(root,workspace,trace,gateway_socket,designer_token,model,prompt,
+            timeout=timeout,effort=effort,binary=binary,resume_thread=resume_thread,
+            extra_env=extra_env,extra_binds=extra_binds,stop_requested=stop_requested)
+    trace=Path(trace);trace.mkdir(parents=True,exist_ok=True)
+    deadline=time.monotonic()+timeout
+    threshold=continuation_policy['reprompt_remaining_seconds']
+    retries=continuation_policy['transport_retries'];failures=0;records=[]
+    initial_prompt=prompt;current_prompt=prompt
+    while True:
+        remaining=deadline-time.monotonic()
+        attempt=trace/f'attempt-{len(records)+1:03d}'
+        rc=_launch_codex_once(root,workspace,attempt,gateway_socket,designer_token,model,current_prompt,
+            timeout=max(0.001,remaining),effort=effort,binary=binary,resume_thread=resume_thread,
+            extra_env=extra_env,extra_binds=extra_binds,stop_requested=stop_requested)
+        # The parent is a documented final-attempt projection for existing consumers.
+        # Every prior attempt, including failed terminal events, remains immutable.
+        for name in ('codex.stdout','codex.stderr','codex.process.json','thread.json','runtime.json'):
+            src=attempt/name
+            if src.exists():shutil.copyfile(src,trace/name)
+        (trace/'prompt.txt').write_text(initial_prompt)
+        session=attempt/'thread.json'
+        if session.exists():resume_thread=json.loads(session.read_text())['thread_id']
+        remaining=deadline-time.monotonic()
+        stopped=stop_requested() if stop_requested else None
+        reason='finished';delay=0
+        if not stopped and resume_thread and remaining>0:
+            if rc==0 and remaining>=threshold:
+                reason='early_return';delay=1
+            elif rc!=0 and transport_failure(attempt) and failures<retries:
+                failures+=1;reason='transport_recovery';delay=min(30,2**failures)
+        records.append({'attempt':str(attempt),'returncode':rc,'session_id':resume_thread,
+            'remaining_seconds':remaining,'decision':reason,'stop_reason':stopped,'at':time.time()})
+        (trace/'continuations.json').write_text(json.dumps({'policy':continuation_policy,
+            'projection':'Parent trace mirrors final attempt; complete history in attempt directories.',
+            'attempts':records},indent=2))
+        if reason=='finished':return rc
+        time.sleep(min(delay,max(0,remaining)))
+        if deadline-time.monotonic()<=0:return rc
+        current_prompt=(f'You still have {int(deadline-time.monotonic())} seconds remaining in the original research window. '
+            'Please continue improving your benchmark and maximize its evaluation quality. '
+            'Continue this same session and workspace with the original wallets and deadline. '
+            'Inspect existing test job IDs and saved responses; do not repeat completed wrong or empty answers. '
+            'Choose your own research methods and testing schedule. '
+            +('The preceding turn was interrupted by a transport failure; reconcile pending operations before issuing new work.'
+              if reason=='transport_recovery' else ''))

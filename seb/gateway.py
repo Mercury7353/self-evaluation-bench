@@ -105,6 +105,10 @@ def reservation(body, price):
     n = body.get('max_tokens', body.get('max_completion_tokens'))
     if not isinstance(n, int) or isinstance(n, bool) or not 0 < n <= 131072:
         raise ValueError('Explicit max_tokens (1..131072) is required')
+    floor=price.get('reservation_output_floor',0)
+    if type(floor) is not int or not 0<=floor<=131072:
+        raise ValueError('Reservation output floor must be an integer in 0..131072')
+    n=max(n,floor)  # Reservation only; never changes request or billed usage.
     input_bound = len(json.dumps(body, ensure_ascii=False).encode()) + 4096
     output_headroom = price.get('reservation_output_headroom', 1.0)
     if (isinstance(output_headroom, bool) or not isinstance(output_headroom, (int, float))

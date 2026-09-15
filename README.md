@@ -435,3 +435,9 @@ usage is retained, billing stays unknown, and its full reservation remains held.
 This option does not turn uncertain usage into a zero-cost call. A researcher
 price can opt into `budget_cache_discount: true` for cache-aware Responses budget
 settlement; pre-request reservations remain conservative.
+
+## Same-session reprompt experiments
+
+For the Codex researcher, `design.continuation: {reprompt_remaining_seconds: 5400, transport_retries: 2}` enables a reprompted run. Set both `design.seconds` and `design.checkpoint_seconds` to `10800` for a three-hour joint research window. Normal returns with at least 90 minutes remaining receive a neutral continuation prompt in the exact same SDK thread. The original deadline, work and wallets are retained. Terminal transport failures permit at most two continuations with backoff; policy/auth/quota failures do not. SDK-internal retries remain disabled so each recovery is recorded and metered by the outer supervisor. All attempts and decisions are retained under `researcher-trace-*/attempt-*` and `continuations.json`; parent trace files project the final attempt for existing consumers.
+
+A closed development or researcher accounting wallet stops research as an infrastructure guard, rather than silently accepting an early finish. This differs from ordinary budget exhaustion. For a provider observed to exceed its requested output limit, `price.reservation_output_floor` can reserve a conservative output bound without changing the actual request or usage-based charge. This does not guarantee provider compliance and does not release earlier unknown charges. Experiments with these settings must be identified separately from earlier single-return runs.
