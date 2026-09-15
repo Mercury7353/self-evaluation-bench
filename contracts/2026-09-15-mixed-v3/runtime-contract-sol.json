@@ -1,0 +1,86 @@
+{
+  "protocol_version": 1,
+  "evaluation_policy": {
+    "version": 1,
+    "min_output_tokens": 1,
+    "max_output_tokens": 131072,
+    "default_output_tokens": 8192,
+    "infra_retries": 3,
+    "attempt_timeout_seconds": 900,
+    "retry_backoff_seconds": 1,
+    "retry_max_backoff_seconds": 30
+  },
+  "auxiliary_models": [
+    {
+      "id": "helper-grader",
+      "roles": [
+        "grader"
+      ],
+      "price": {
+        "input": 5,
+        "output": 30,
+        "cache_read_multiplier": 0.1,
+        "cache_write_multiplier": 1,
+        "long_context": {
+          "threshold_tokens": 272000,
+          "input_multiplier": 2,
+          "output_multiplier": 1.5
+        }
+      },
+      "effort": "xhigh"
+    },
+    {
+      "id": "helper-simulator",
+      "roles": [
+        "simulator",
+        "grader"
+      ],
+      "price": {
+        "cache_read_multiplier": 0.25,
+        "input": 0.06,
+        "output": 0.18
+      },
+      "effort": "max"
+    }
+  ],
+  "joint_domains": [
+    "coding",
+    "co-work",
+    "reasoning"
+  ],
+  "minimum_items": 100,
+  "pilot_minimum_items": 1,
+  "suite_concurrency": 2,
+  "request_concurrency_per_model": 2,
+  "max_pending_suites": 16,
+  "suite_cost_goal_usd": 30,
+  "item_cost_cap_usd": 30,
+  "suite_cost_cap_usd": 30,
+  "requires_item_id": true,
+  "suite_timeout_seconds": 36000,
+  "research_deadline_epoch": 1789499657.6729927,
+  "output_scale": [
+    0,
+    1
+  ],
+  "execution_statuses": [
+    "completed",
+    "infra_error",
+    "not_run",
+    "budget_exhausted",
+    "not_selected"
+  ],
+  "answer_statuses": [
+    "answered",
+    "missing",
+    "invalid",
+    "refused",
+    "not_applicable"
+  ],
+  "client_timeout_seconds": 4200,
+  "required_submission": [
+    "run.py",
+    "README.md",
+    "evaluation.json"
+  ]
+}

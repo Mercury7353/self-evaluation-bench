@@ -1,0 +1,29 @@
+{
+  "protocol_version": 1,
+  "items": [
+    {
+      "id": "q001",
+      "score": 1.0,
+      "execution_status": "completed",
+      "answer_status": "answered",
+      "evidence": [
+        {
+          "kind": "llm",
+          "id": "REPLACE_WITH_ACTUAL_LEDGER_CALL_ID"
+        }
+      ]
+    },
+    {
+      "id": "q002",
+      "score": 0.0,
+      "execution_status": "completed",
+      "answer_status": "answered",
+      "evidence": [
+        {
+          "kind": "llm",
+          "id": "REPLACE_WITH_ACTUAL_LEDGER_CALL_ID"
+        }
+      ]
+    }
+  ]
+}

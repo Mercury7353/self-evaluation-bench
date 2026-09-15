@@ -1,0 +1,39 @@
+{
+  "exported_utc": "2026-09-15T09:26:00.969132+00:00",
+  "base_code_commit": "04de5ad76a19c7db85b1fb4a73952602ddb9e73f",
+  "continuation_code_commit": "c427c82",
+  "source_exact_files": {
+    "CONTRACT.txt": {
+      "source": "/nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/runs/r-gpt-6-astra/researcher-work/CONTRACT.md",
+      "sha256": "4a14e18157c4b5129ddbb08ab134d1d2a1e4f1322589bbb5617c34515df77b7b"
+    },
+    "research_sdk.py": {
+      "source": "/nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/runs/r-gpt-6-astra/researcher-work/research_sdk.py",
+      "sha256": "c736d75292674cd4ff88379acb767dad0f0cd0b93e06d776bf9cdc905dc0c755"
+    },
+    "operator-instructions.txt": {
+      "source": "/nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/instructions.txt",
+      "sha256": "d80477641d39ad64eb1cbf05d68fc95785a095fdd75b7c7ebab7975f9a0054a7"
+    },
+    "prompt-astra.txt": {
+      "source": "/nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/runs/r-gpt-6-astra/researcher-trace-1/prompt.txt",
+      "sha256": "5f24e01669e8194211f149c792af97cdff2f145c1d892976d4e2018aa5ac7f14"
+    },
+    "prompt-sol.txt": {
+      "source": "/nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/runs/r-gpt-5.6-sol/researcher-trace-1/prompt.txt",
+      "sha256": "c93e15ba87c652b4e434240be150ee547058c37bb5878f2fc8b78952c927da50"
+    },
+    "active-config.yaml": {
+      "source": "/nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/config.yaml",
+      "sha256": "a5887359ce719577ccc97cf3370914b9f2e4c74c6a24117467b96b6715f1cfd0"
+    }
+  },
+  "runtime_contract_is_readonly_public_projection": true,
+  "known_interface_gaps": [
+    "Client.info public joint_domains includes sealed target names; this is not identity-blind sealed evaluation. Sealed score labels remain hidden.",
+    "Current domain aggregates still serve sealed compatibility diagnostics; per-visible-target predictions are separate.",
+    "Researcher network disabled; no autonomous external dataset retrieval interface.",
+    "Minimum 100 is structural manifest count; semantic uniqueness is audited separately.",
+    "Claude researcher accounting uses legacy conservative Messages cache charging; Responses researcher discount option does not apply."
+  ]
+}

@@ -1,0 +1,86 @@
+# Researcher interface
+
+The environment has Python 3.12, the SDK, and the mounted scientific packages. Internet is disabled.
+Only explicitly supplied resources and scoped gateway operations are available. Candidate models and
+visible target labels are in whitebox.json. `Client().info()` gives the runtime contract and budget limits.
+
+```python
+from research_sdk import Client
+c = Client()
+job = c.submit("submission", model="candidate-id", pilot=True)
+result = c.wait(job["id"], timeout=3600)  # On timeout keep polling this ID.
+feedback = c.feedback([job_id_a, job_id_b, job_id_c])
+```
+
+Small development pilots are allowed; final submissions must meet the configured minimum item count.
+Feedback needs one completed job per model, at least three models, all from the same suite snapshot.
+Scores, billing and execution completeness are distinct. Follow the per-item budget contract.
+
+`run.py --context PATH --output PATH` receives a scoped evaluation context for ONE candidate model.
+Use `Client(context).item(item_id, prompt, grader)`; grader(text) returns a number in [0,1]. The SDK
+records evidence and distinguishes completed empty answers (zero) from unresolved infrastructure.
+Write JSON `{"protocol_version":1,"items":[...]}` with exactly one result for EACH declared item.
+Persist intermediate results atomically. Do not catch program bugs and turn them into wrong answers.
+`Client.agent(task_path, item_id=...)` also supports a single-container Harbor task through Claude Code;
+it requires the optional agent dependencies and an available task image.
+
+If configured, `auxiliary_models` lists fixed grader/simulator handles separately from candidates.
+Inside a suite, call `c.chat(..., model="helper-id", item_id=item_id)` and return its evidence
+alongside the candidate evidence. A grader may return `{"score": ..., "answer_status": "answered",
+"evidence": [helper_reply["evidence"]]}`; `c.item` merges that list with the candidate call.
+All helper calls consume the same development/evaluation wallet and item/suite limits, including
+unknown usage reservations. They inherit the frozen output/retry policy. Helper IDs cannot be
+suite/agent targets; every completed item must include the evaluated candidate's own evidence.
+A grader API failure leaves the item incomplete without repeating the candidate answer.
+Record helper prompts, parsing and failure handling in the frozen submission, as with local graders.
+
+`evaluation.json` example (extend to the required item count):
+```json
+{"protocol_version":1,"items":[{"id":"example"}],"selection":"fixed","aggregation":{"kind":"weighted_mean"}}
+```
+Items may carry positive weights and a shared budget_group. Adaptive selection or custom aggregation
+must declare its frozen method in the manifest. Item IDs, graders, weights and assets are frozen together.
+README.md explains execution. Keep transient outputs and caches outside submission/.
+
+Required `predictor.py` contract:
+- fit(training_rows, target_metadata) -> fitted object
+- predict(fitted, observations) -> {target_id: finite_score or {"status":"unsupported"}}
+- training_rows: [{"observations": {item_id: score_or_null}, "targets": {target_id: score}}]
+- observations: {item_id: score_or_null}; no candidate identity or test labels
+- target_metadata: {target_id: {"scale": positive_number, "status": "primary_archival"}}
+- scores at scale 1 must be in [0,1]. Other scales are in the reference's original units.
+- optional read-only assets go in predictor_assets/. Each fold runs in a fresh offline process.
+
+
+# Joint protocol v2
+
+This is one research run across three domains. whitebox.json lists each domain and its visible targets.
+The development wallet and time limit are shared. Each final candidate has one whole-program cost cap;
+shared item or grader calls are counted once. Small development pilots may cover a subset of domains.
+
+predictor.py is required. Its fit/predict code receives all visible development labels and anonymous
+item observations, but no undisclosed target names/labels or held-out labels. Cross-domain features and
+predictor_assets/ are allowed. Return predictions keyed by the visible target IDs.
+
+The final evaluation.json must declare domain_aggregations for exactly the three domain IDs in
+whitebox.json. Reuse the same declared item in multiple domains without issuing additional calls:
+"domain_aggregations": {
+  "coding": {"kind":"weighted_mean", "weights":{"example":1}},
+  "co-work": {"kind":"weighted_mean", "weights":{"example":1}},
+  "reasoning": {"kind":"weighted_mean", "weights":{"example":1}}
+}
+This is an interface example, not a recommended measurement design. The platform computes these
+weighted means from item results. For a custom rule, declare kind="custom", its input "items" list,
+and a textual "method"; implement the frozen rule in run.py and return its [0,1] value under
+"domain_scores": {domain_id: value}. Unresolved selected input items make that domain incomplete.
+Adaptive exclusion follows the existing frozen selection rule. Missing custom outputs are failures,
+not constant predictions. Each domain's two undisclosed targets use exactly its one frozen score.
+
+Final acceptance reports per-target results and separate visible/sealed utility, averaged equally
+across domains. It never trains a new predictor on undisclosed labels or treats domains as independent runs.
+
+Keep submission/ in a complete, runnable state, including predictor.py. The controller saves
+structurally valid snapshots about every five seconds and at normal exit. If your research time or
+researcher-call budget runs out, it freezes the latest valid saved snapshot, not the highest-scoring
+version. Partial edits are retained for audit. Validation of a snapshot does not establish correctness.
+No new development calls are submitted after the research deadline; existing matching jobs are reused.

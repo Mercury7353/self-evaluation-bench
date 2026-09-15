@@ -1,0 +1,106 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>当前研究契约与Claude复现实验交接</title><style>body{font:17px/1.75 system-ui;max-width:1150px;margin:35px auto;padding:0 20px;color:#172638}table{border-collapse:collapse;width:100%;font-size:15px}td,th{border:1px solid #ccd4df;padding:10px;text-align:left}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#edf1f6;padding:18px;font-size:13px}code{overflow-wrap:anywhere}summary{cursor:pointer;font-weight:bold}.note{background:#fff0d7;padding:18px}a{color:#1758a3}</style><h1>当前研究契约：合作者 Claude 测试交接</h1><p>2026-09-15。对应正在执行的 GPT-6 Astra / GPT-5.6 Sol mixed-v3 研究。此页只导出协议，不启动 Claude、不追加实验预算、不改运行中的两路配置。</p><p><b>交接原则：</b>固定题目/轨迹输入、候选面板与推理配置、开发参考、预算和评分代码；合作者填写 Claude 的精确型号、provider、effort与价格，使用 Claude Code harness。报告比较的是 researcher system（模型+harness+effort），不是纯模型参数的因果对比。</p>
+<h2>1. 下载入口</h2><table><tr><th>文件</th><th>用途</th></tr><tr><td><a href="CONTRACT.txt">CONTRACT.txt</a></td><td>两路实际工作区契约，逐字一致</td></tr><tr><td><a href="operator-instructions.txt">operator-instructions.txt</a></td><td>两路实际共同附加任务指令</td></tr><tr><td><a href="prompt-astra.txt">prompt-astra.txt</a></td><td>Astra完整启动prompt，含当时剩余秒数</td></tr><tr><td><a href="prompt-sol.txt">prompt-sol.txt</a></td><td>Sol完整启动prompt，含原截止下的剩余秒数</td></tr><tr><td><a href="research_sdk.py">research_sdk.py</a></td><td>实际挂载的SDK原文件</td></tr><tr><td><a href="active-config.yaml">active-config.yaml</a></td><td>正在运行的配置快照；无key，保留原主机路径供审计</td></tr><tr><td><a href="claude-template.yaml">claude-template.yaml</a></td><td>可移植Claude配置模板；有必须填写的占位符，不是直接可执行的凭据配置</td></tr><tr><td><a href="whitebox-structure.json">whitebox-structure.json</a></td><td>可见标签结构；分数值以加载占位符替代，不是运行输入</td></tr><tr><td><a href="runtime-contract-astra.json">runtime-contract-astra.json</a></td><td>实际配置生成的Client.info公开契约投影</td></tr><tr><td><a href="runtime-contract-sol.json">runtime-contract-sol.json</a></td><td>Sol实际公开契约投影；绝对deadline是历史值</td></tr><tr><td><a href="materials.lock.json">materials.lock.json</a></td><td>原题版本、来源、参考文件SHA与轨迹清单；不含数据正文</td></tr><tr><td><a href="evaluation.example.json">evaluation.example.json</a></td><td>两题结构示例，仅可作pilot，不满足最终100题要求</td></tr><tr><td><a href="result.example.json">result.example.json</a></td><td>结果结构；证据ID必须来自实际网关，不能原样提交</td></tr><tr><td><a href="provenance.json">provenance.json</a></td><td>精确来源、代码版本与已知差异</td></tr></table><p>从GitHub下载整个分支或使用raw下载保留原文件；不要复制GitHub页面HTML当代码。代码仓库固定版本：<a href="https://github.com/Mercury7353/self-evaluation-bench/commit/04de5ad76a19c7db85b1fb4a73952602ddb9e73f">04de5ad（两路启动协议）</a>；<a href="https://github.com/Mercury7353/self-evaluation-bench/commit/c427c82">c427c82（Sol预检原账本接续，仅恢复差异）</a>。</p>
+<h2>2. 固定任务与输入</h2><p>一轮连续研究，联合覆盖三个领域；拟合五个visible目标，允许各自使用不同子集、共享题目与预测器。没有τ²，也没有指定的MMLU/GSM/MBPP辅助题库。不向researcher提供历史researcher的交付、轨迹分析报告或留出模型成绩。</p><table><tr><th>目标</th><th>原题数</th><th>实际轨迹输入</th><th>开发/留出参考数</th></tr><tr><td>TB2.1</td><td>89</td><td>32条历史Qwen配置完整轨迹</td><td>4 / 4</td></tr><tr><td>DeepSWE1.1</td><td>113</td><td>6条完整开发轨迹+2260条索引，索引不等于已下载轨迹</td><td>3 / 3</td></tr><tr><td>GDPval-AA v2</td><td>220</td><td>人类参考交付物和rubric；没有完整模型操作轨迹库</td><td>4 / 4</td></tr><tr><td>ArXivMath June</td><td>48</td><td>10份模型完整作答示例</td><td>4 / 3</td></tr><tr><td>HLE text</td><td>2158</td><td>标准答案与reference rationale，不是模型作答轨迹</td><td>4 / 4</td></tr></table><p>合计2628原题。原题包约2.5GB；GDPval历史附件检查仍有恢复/不可读项，源码和参考grader不代表所有原题环境都能直接执行。目标成绩是异构公开测量，GDPval用Elo，其余为fraction。新provider身份匹配仍是探索性假设。</p>
+<h2>3. Candidate与helper：不是Claude researcher的选型列表</h2><table><tr><th>开发4个</th><th>留出4个</th></tr><tr><td>GPT-5.5-2026-04-23（OpenAI）</td><td>GPT-6 Astra（OpenAI）</td></tr><tr><td>GLM-5.2（VectorEngine）</td><td>GPT-5.6 Sol（OpenAI）</td></tr><tr><td>DeepSeek V4 Flash-0731（VectorEngine）</td><td>Kimi K3（VectorEngine）</td></tr><tr><td>Qwen3.8 Max（VectorEngine）</td><td>MiMo V2.5 Pro（VectorEngine）</td></tr></table><p>精确effort、native limits、价格、ID以active-config为准。helper-grader=官方GPT-5.5；helper-simulator=VectorEngine DeepSeek Flash，同时可做grader。helper计入同一个测试钱包，不能作为额外candidate。Claude researcher不会因此自动成为candidate。</p>
+<h2>4. 预算、时限和迭代自由度</h2><p>每路D=$100 researcher自身，B=$100开发candidate/helper，E=$120最终验收（4模型×每套最多$30）。这是上限，不是预付或预期支出。研究10小时，验收最多10小时。两路已运行预算与合作者新实验必须分账；这份交接不授权从本机启动Claude或挪用其余额。</p><p>候选使用冻结DeepInfra标准价，官方OpenAI使用冻结官方价；真实VectorEngine账单另列。未知usage保留预留，不释放为零。默认输出8192，下限1，上限131072且不超过原生限制；2套程序并发、每模型2请求。不开跨researcher响应缓存。本轮CPU4/内存16GiB。</p><p>agent自主选择、合成、混合、分子集、分配测试预算、迭代和停止。最终至少100个独立计分题；少题pilot允许。批次调用可以共享，但每题必须返回独立分数和实际调用证据，跨目标共享题只计一次。题目语义是否重复/有效另做审计，代码只验证结构数量与证据。没有每领域至少30题的实现门槛，不应擅自给Claude加上。</p><p>最终版本不强制补测。controller只复用/查询同一冻结快照的既有开发任务，不再主动提交新开发任务；没有最终快照结果时，预测器fit得到空训练列表，可以使用自己保存的拟合资产或自行处理。不得让维护者替模型补训一个有利预测器。</p>
+<h2>5. 交付与评分接口</h2><p>submission/包含run.py、evaluation.json、README.md、必需predictor.py，以及完整题目/评分资源与可选predictor_assets/。程序接受--context与--output，对一个匿名candidate执行整套测量；返回protocol_version=1与每个声明题恰好一个结果。分数[0,1]，费用不作为能力特征。completed错误/空答不能重复抽样刷分；infra/not_run/预算耗尽保留缺项语义。每题至少有该candidate自己的调用或agent证据，不能只引用judge。</p><p>predictor.fit(training_rows,target_metadata)→fitted；predictor.predict(fitted,observations)→按visible target ID给出数值或unsupported。训练输入只有可见开发标签与匿名题目分数，不接收留出标签或candidate名称。完整类型见CONTRACT原文与SDK。题目ID、grader、权重、选择/自适应规则、预测器和资产一起冻结。</p><p>三个domain_aggregations仍是当前执行接口的必填项，可共享同一题，不应误读成必须单一总分或三个独立研究。当前visible主要结果是开发拟合后的留出预测；开发feedback有家族CV，但不能说最终全部指标也是同一种CV。sealed仍走旧领域聚合兼容诊断，且参考缺失，因此最终eligible可为false而visible仍有单独观察结果；不隐去缺项拼出完整主表。</p>
+<h2>6. 必须知道的当前契约差异</h2><div class="note"><p><b>以下是现存实现事实，不能靠改交接文字掩盖：</b></p><ul><li>CONTRACT标题仍写Joint protocol v2，active-config是v3；v3允许不等量目标，此轮co-work只有GDPval。public JSON内protocol_version=1指逐题结果格式，是另一层版本。</li><li>Client.info的公开joint_domains实际包含sealed目标名称。因此本轮<b>不是sealed目标身份完全隐藏</b>；sealed分数仍未提供。不要让合作者据文字声明“名字也不可见”。</li><li>公开required_submission数组漏列predictor.py，但联合契约与冻结器实际要求它。</li><li>指令中“可用工具获取额外资料”并不代表自由联网：本轮researcher网络关闭，无独立外部题库检索工具。不要给Claude独自开放无限搜索后称严格复现。</li><li>仅GLM5.2显式允许不自洽usage的答案交付而费用保留未知。Sol的Kimi前置探测也出现该问题，采用离线核验保存响应接续；其未知费用和最初失败记录未修改。其他中转响应仍可能出现infra。</li><li>OpenAI researcher使用Responses缓存折扣预算结算；当前Claude Code Messages路径仍按保守缓存口径扣预算，可能提前停。两者实际usage和折扣估算要单列，不能声称同样D=$100就有相同实际研究计算量。</li></ul></div>
+<h2>7. 合作者测试Claude的具体步骤</h2><ol><li>检出上述固定实现commit，按代码README安装Python3.12、bwrap、科学依赖和原生Linux Claude Code；固定并记录Claude Code版本。正式研究需独立Linux隔离环境。</li><li>复制本目录到本地工作配置目录。准备references/、materials/targets/、materials/trajectories/和runtime/；按materials.lock复核原题版本与哈希。数据正文、参考分数、rootfs、密钥没有上传GitHub，因此<b>只git clone不能直接复现</b>；需要维护者另行提供匹配数据文件，或按源revision重建并核验。不要将占位分数补成零。</li><li>编辑claude-template.yaml，仅填写Claude精确模型、provider端点、effort、输入/输出价格及必要缓存价格，并配置本机路径。候选面板/参数、输入、B/E、题数和评分器保持一致。input/output=null故意让校验失败，防止未知价格按零启动。</li><li>当前Anthropic wire网关拼接/anthropic/v1/messages；端点必须支持这个前缀。<b>不要把官方api.anthropic.com直接当作已适配的端点</b>，官方路径映射需由接入层处理并验证。Chat Completions中转不能直接作为Claude Code researcher的原生provider。</li><li>各key通过SEB_OPENAI_KEY、SEB_VECTORENGINE_KEY、SEB_CLAUDE_KEY环境变量或私有加载器传入。不要把key粘到配置、报告或版本库。先无付费validate，再在该新allocation内做一次真实工具往返/usage校准；保留错误与未决费用。</li><li>为Claude使用全新output目录运行一次研究。复用operator-instructions，不复用Astra/Sol历史prompt中的倒计时；完整prompt由controller重新生成。新预算须由实验所有者确认，不能挪用运行中钱包。</li><li>回传精确模型+harness+effort、配置/材料/代码哈希、完整可读轨迹、版本快照与测试任务ID、逐题/逐目标结果、原始usage与账本。不可只给最终总分、最终README或“服务success”。</li></ol><pre>git clone git@github.com:Mercury7353/self-evaluation-bench.git
+cd self-evaluation-bench
+git checkout campaign/restart-20260915
+# 按README安装依赖；准备本地资料、完整配置及私有环境变量。
+seb experiment validate --config /absolute/path/claude-template.yaml
+# 仅在配置完整、凭据和新allocation已授权时执行：
+seb experiment run --config /absolute/path/claude-template.yaml   --researcher r-claude-collaborator --output /new/unique/claude-run</pre>
+<h2>8. 实际契约全文</h2><details open><summary>operator-instructions.txt</summary><pre>Research a low-cost executable benchmark with at least 100 independently scored questions to predict the five visible complex target benchmarks. Work once jointly across coding, co-work and reasoning. Choose your own subsets, shared questions, synthesis, selection, transformations and iterations. No prescribed auxiliary question banks are supplied. The fixed input contains original target questions, scoring resources, curated historical trajectories and sparse public development reference scores.
+At least 100 unique scored questions must appear in the final evaluation.json. A batch call can answer multiple questions, but return separate question scores and evidence; a shared question counts once across targets. Pilot submissions may be smaller. Domain aggregates are compatibility diagnostics; the main requested outputs are separate predictions for each visible target. Never force all targets to share a ranking.
+Budget: researcher $100; development candidate/helper tests $100 shared across all domains; final whole program &lt;=$30 per candidate. Research time is 10 hours. Standardized candidate prices are frozen from the existing DeepInfra/OpenAI snapshots; actual reseller invoices are separate. The gateway retains unknown usage reservations. Use your own testing schedule; a final revision need not be retested and the controller will not initiate additional development measurements. Keep optional fitted predictor assets if you do not have final-version development measurements.
+The five visible references are heterogeneous public target measurements, not one same-protocol matrix. GDPval-AA scores use Elo units. Do not invent missing references or use heldout labels. The historical trajectories may use different model/harness versions. Original task source availability does not imply all upstream environments run unchanged in this sandbox. Keep limitations visible.
+Use the executable SDK/contract for development calls and helper graders, retain job IDs and original responses, and distinguish completed empty/wrong answers from infrastructure errors. Save your experimental reasoning, observations and versions; do not repeatedly rerun completed wrong/empty answers. Final assets must be self-contained. You may obtain additional task resources if needed through the available tools; no source family is prescribed. Do not fetch candidate scores or hidden-target data.
+</pre></details><details open><summary>CONTRACT.txt</summary><pre># Researcher interface
+
+The environment has Python 3.12, the SDK, and the mounted scientific packages. Internet is disabled.
+Only explicitly supplied resources and scoped gateway operations are available. Candidate models and
+visible target labels are in whitebox.json. `Client().info()` gives the runtime contract and budget limits.
+
+```python
+from research_sdk import Client
+c = Client()
+job = c.submit(&quot;submission&quot;, model=&quot;candidate-id&quot;, pilot=True)
+result = c.wait(job[&quot;id&quot;], timeout=3600)  # On timeout keep polling this ID.
+feedback = c.feedback([job_id_a, job_id_b, job_id_c])
+```
+
+Small development pilots are allowed; final submissions must meet the configured minimum item count.
+Feedback needs one completed job per model, at least three models, all from the same suite snapshot.
+Scores, billing and execution completeness are distinct. Follow the per-item budget contract.
+
+`run.py --context PATH --output PATH` receives a scoped evaluation context for ONE candidate model.
+Use `Client(context).item(item_id, prompt, grader)`; grader(text) returns a number in [0,1]. The SDK
+records evidence and distinguishes completed empty answers (zero) from unresolved infrastructure.
+Write JSON `{&quot;protocol_version&quot;:1,&quot;items&quot;:[...]}` with exactly one result for EACH declared item.
+Persist intermediate results atomically. Do not catch program bugs and turn them into wrong answers.
+`Client.agent(task_path, item_id=...)` also supports a single-container Harbor task through Claude Code;
+it requires the optional agent dependencies and an available task image.
+
+If configured, `auxiliary_models` lists fixed grader/simulator handles separately from candidates.
+Inside a suite, call `c.chat(..., model=&quot;helper-id&quot;, item_id=item_id)` and return its evidence
+alongside the candidate evidence. A grader may return `{&quot;score&quot;: ..., &quot;answer_status&quot;: &quot;answered&quot;,
+&quot;evidence&quot;: [helper_reply[&quot;evidence&quot;]]}`; `c.item` merges that list with the candidate call.
+All helper calls consume the same development/evaluation wallet and item/suite limits, including
+unknown usage reservations. They inherit the frozen output/retry policy. Helper IDs cannot be
+suite/agent targets; every completed item must include the evaluated candidate&#x27;s own evidence.
+A grader API failure leaves the item incomplete without repeating the candidate answer.
+Record helper prompts, parsing and failure handling in the frozen submission, as with local graders.
+
+`evaluation.json` example (extend to the required item count):
+```json
+{&quot;protocol_version&quot;:1,&quot;items&quot;:[{&quot;id&quot;:&quot;example&quot;}],&quot;selection&quot;:&quot;fixed&quot;,&quot;aggregation&quot;:{&quot;kind&quot;:&quot;weighted_mean&quot;}}
+```
+Items may carry positive weights and a shared budget_group. Adaptive selection or custom aggregation
+must declare its frozen method in the manifest. Item IDs, graders, weights and assets are frozen together.
+README.md explains execution. Keep transient outputs and caches outside submission/.
+
+Required `predictor.py` contract:
+- fit(training_rows, target_metadata) -&gt; fitted object
+- predict(fitted, observations) -&gt; {target_id: finite_score or {&quot;status&quot;:&quot;unsupported&quot;}}
+- training_rows: [{&quot;observations&quot;: {item_id: score_or_null}, &quot;targets&quot;: {target_id: score}}]
+- observations: {item_id: score_or_null}; no candidate identity or test labels
+- target_metadata: {target_id: {&quot;scale&quot;: positive_number, &quot;status&quot;: &quot;primary_archival&quot;}}
+- scores at scale 1 must be in [0,1]. Other scales are in the reference&#x27;s original units.
+- optional read-only assets go in predictor_assets/. Each fold runs in a fresh offline process.
+
+
+# Joint protocol v2
+
+This is one research run across three domains. whitebox.json lists each domain and its visible targets.
+The development wallet and time limit are shared. Each final candidate has one whole-program cost cap;
+shared item or grader calls are counted once. Small development pilots may cover a subset of domains.
+
+predictor.py is required. Its fit/predict code receives all visible development labels and anonymous
+item observations, but no undisclosed target names/labels or held-out labels. Cross-domain features and
+predictor_assets/ are allowed. Return predictions keyed by the visible target IDs.
+
+The final evaluation.json must declare domain_aggregations for exactly the three domain IDs in
+whitebox.json. Reuse the same declared item in multiple domains without issuing additional calls:
+&quot;domain_aggregations&quot;: {
+  &quot;coding&quot;: {&quot;kind&quot;:&quot;weighted_mean&quot;, &quot;weights&quot;:{&quot;example&quot;:1}},
+  &quot;co-work&quot;: {&quot;kind&quot;:&quot;weighted_mean&quot;, &quot;weights&quot;:{&quot;example&quot;:1}},
+  &quot;reasoning&quot;: {&quot;kind&quot;:&quot;weighted_mean&quot;, &quot;weights&quot;:{&quot;example&quot;:1}}
+}
+This is an interface example, not a recommended measurement design. The platform computes these
+weighted means from item results. For a custom rule, declare kind=&quot;custom&quot;, its input &quot;items&quot; list,
+and a textual &quot;method&quot;; implement the frozen rule in run.py and return its [0,1] value under
+&quot;domain_scores&quot;: {domain_id: value}. Unresolved selected input items make that domain incomplete.
+Adaptive exclusion follows the existing frozen selection rule. Missing custom outputs are failures,
+not constant predictions. Each domain&#x27;s two undisclosed targets use exactly its one frozen score.
+
+Final acceptance reports per-target results and separate visible/sealed utility, averaged equally
+across domains. It never trains a new predictor on undisclosed labels or treats domains as independent runs.
+
+Keep submission/ in a complete, runnable state, including predictor.py. The controller saves
+structurally valid snapshots about every five seconds and at normal exit. If your research time or
+researcher-call budget runs out, it freezes the latest valid saved snapshot, not the highest-scoring
+version. Partial edits are retained for audit. Validation of a snapshot does not establish correctness.
+No new development calls are submitted after the research deadline; existing matching jobs are reused.
+</pre></details><h2>9. 文件完整性</h2><table><tr><th>文件</th><th>SHA-256</th></tr><tr><td>CONTRACT.txt</td><td><code>4a14e18157c4b5129ddbb08ab134d1d2a1e4f1322589bbb5617c34515df77b7b</code></td></tr><tr><td>active-config.yaml</td><td><code>a5887359ce719577ccc97cf3370914b9f2e4c74c6a24117467b96b6715f1cfd0</code></td></tr><tr><td>claude-template.yaml</td><td><code>48892ac720dfb906454b118fdebf798f52fca6b87ee21fd33e6a24f29f1ebddf</code></td></tr><tr><td>evaluation.example.json</td><td><code>ab9b75345a5dcb647202903d990647f8d50019c714f3e9cff3eb6c0ff27e993c</code></td></tr><tr><td>materials.lock.json</td><td><code>21b5ed50295f721148c06b76bac0d931988743640ba672d968a1883147dcc0b0</code></td></tr><tr><td>operator-instructions.txt</td><td><code>d80477641d39ad64eb1cbf05d68fc95785a095fdd75b7c7ebab7975f9a0054a7</code></td></tr><tr><td>prompt-astra.txt</td><td><code>5f24e01669e8194211f149c792af97cdff2f145c1d892976d4e2018aa5ac7f14</code></td></tr><tr><td>prompt-sol.txt</td><td><code>c93e15ba87c652b4e434240be150ee547058c37bb5878f2fc8b78952c927da50</code></td></tr><tr><td>provenance.json</td><td><code>a009cb15a697b9125d712a286e6a8c665cc075a6c2b7bc255a10c527e31d1ce8</code></td></tr><tr><td>research_sdk.py</td><td><code>c736d75292674cd4ff88379acb767dad0f0cd0b93e06d776bf9cdc905dc0c755</code></td></tr><tr><td>result.example.json</td><td><code>6976ec6482ec62b2ea90c118b3bbfa7026a81fabf9ba397e5ca924e086130022</code></td></tr><tr><td>runtime-contract-astra.json</td><td><code>476c3f2ea997d386a75a1c53a45d546c523e5ee7f5e2ffe336b2bc51060b399a</code></td></tr><tr><td>runtime-contract-sol.json</td><td><code>0deed0a08d48d1d333675f302bdca8e33bdcf574f655ac89d369f35e2e231fc3</code></td></tr><tr><td>whitebox-structure.json</td><td><code>3564cdd7af5803795e944a3d7a2ac18ca00dac383e733fbcc932ece9db339780</code></td></tr></table><p>运行中的研究、数据和账本未修改；本次无新付费请求。</p></html>

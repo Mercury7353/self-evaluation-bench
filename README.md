@@ -4,6 +4,10 @@ Evaluate an **agent researcher's ability to build an inexpensive benchmark**. A 
 
 The pipeline runs **researcher → development feedback → frozen submission → independent model panel → target correlations + overall**. This repository contains reusable infrastructure and synthetic fixtures. Supply your own task resources, target scores, provider credentials, and experiment settings.
 
+## Current experiment contract and Claude handoff
+
+The [2026-09-15 contract package](contracts/2026-09-15-mixed-v3/index.html) contains the exact researcher instructions and SDK, input/output schemas, material version hashes, current configuration, and known interface limitations. Start from [claude-template.yaml](contracts/2026-09-15-mixed-v3/claude-template.yaml) for a collaborator-run Claude experiment. Fill in the exact model, prices, compatible endpoint and local resource paths; credentials and task/reference datasets are supplied separately. The template is intentionally not runnable until those fields are completed. See the handoff for the Anthropic endpoint-path requirement and cache-accounting differences.
+
 ## Install
 
 Use Linux with working unprivileged user/network namespaces, Bubblewrap (`bwrap`), and Python 3.12. The `claude_code` researcher harness requires a **native Linux Claude Code executable** on `PATH`. The optional `codex` harness requires Node and the pinned SDK installation below. Both execute tools inside an isolated root filesystem. Optional Harbor agent tasks also require Apptainer and the `agent` extra.

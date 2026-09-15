@@ -1,0 +1,40 @@
+{
+  "protocol_version": 1,
+  "items": [
+    {
+      "id": "q001",
+      "budget_group": "batch001"
+    },
+    {
+      "id": "q002",
+      "budget_group": "batch001"
+    }
+  ],
+  "selection": "fixed",
+  "aggregation": {
+    "kind": "weighted_mean"
+  },
+  "domain_aggregations": {
+    "coding": {
+      "kind": "weighted_mean",
+      "weights": {
+        "q001": 1,
+        "q002": 1
+      }
+    },
+    "co-work": {
+      "kind": "weighted_mean",
+      "weights": {
+        "q001": 1,
+        "q002": 1
+      }
+    },
+    "reasoning": {
+      "kind": "weighted_mean",
+      "weights": {
+        "q001": 1,
+        "q002": 1
+      }
+    }
+  }
+}

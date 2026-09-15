@@ -1,0 +1,17 @@
+{
+  "CONTRACT.txt": "4a14e18157c4b5129ddbb08ab134d1d2a1e4f1322589bbb5617c34515df77b7b",
+  "active-config.yaml": "a5887359ce719577ccc97cf3370914b9f2e4c74c6a24117467b96b6715f1cfd0",
+  "claude-template.yaml": "48892ac720dfb906454b118fdebf798f52fca6b87ee21fd33e6a24f29f1ebddf",
+  "evaluation.example.json": "ab9b75345a5dcb647202903d990647f8d50019c714f3e9cff3eb6c0ff27e993c",
+  "index.html": "41b733827b046262b11bd7452fc10eec4036fccabc8d77aae982a07d165cde0f",
+  "materials.lock.json": "21b5ed50295f721148c06b76bac0d931988743640ba672d968a1883147dcc0b0",
+  "operator-instructions.txt": "d80477641d39ad64eb1cbf05d68fc95785a095fdd75b7c7ebab7975f9a0054a7",
+  "prompt-astra.txt": "5f24e01669e8194211f149c792af97cdff2f145c1d892976d4e2018aa5ac7f14",
+  "prompt-sol.txt": "c93e15ba87c652b4e434240be150ee547058c37bb5878f2fc8b78952c927da50",
+  "provenance.json": "a009cb15a697b9125d712a286e6a8c665cc075a6c2b7bc255a10c527e31d1ce8",
+  "research_sdk.py": "c736d75292674cd4ff88379acb767dad0f0cd0b93e06d776bf9cdc905dc0c755",
+  "result.example.json": "6976ec6482ec62b2ea90c118b3bbfa7026a81fabf9ba397e5ca924e086130022",
+  "runtime-contract-astra.json": "476c3f2ea997d386a75a1c53a45d546c523e5ee7f5e2ffe336b2bc51060b399a",
+  "runtime-contract-sol.json": "0deed0a08d48d1d333675f302bdca8e33bdcf574f655ac89d369f35e2e231fc3",
+  "whitebox-structure.json": "3564cdd7af5803795e944a3d7a2ac18ca00dac383e733fbcc932ece9db339780"
+}

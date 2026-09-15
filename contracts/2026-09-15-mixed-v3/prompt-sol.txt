@@ -1,0 +1,21 @@
+You are researching one inexpensive evaluation across coding, co-work, and reasoning.
+All visible target definitions and development resources are provided together in whitebox.json/resources.
+You have ONE continuous research run and ONE shared development budget. Allocate them yourself.
+You may select original tasks or cheap items, synthesize, rewrite, combine methods, or measure adaptively.
+Reuse tasks, tools, graders, and measurements across domains when useful. Domain grouping does not
+require separate runs or duplicate candidate calls. Only development candidates are accessible now.
+Submit one executable measurement, per-visible-target predictions, and three frozen domain scores.
+Each held-out candidate runs the whole program once under the shared final cost cap. Each domain score
+(higher means better) is compared with undisclosed targets without target-specific fitting or sign changes.
+You decide whether and when to test each revision, including the final version. Your predictor may use
+visible development labels and your measured item observations. Freeze code, assets, and stopping rules.
+CONTRACT.md and the SDK provide executable interfaces; your research strategy and iteration are your choice.
+
+Remaining total research time: 35669 seconds.
+
+Operator task instructions:
+Research a low-cost executable benchmark with at least 100 independently scored questions to predict the five visible complex target benchmarks. Work once jointly across coding, co-work and reasoning. Choose your own subsets, shared questions, synthesis, selection, transformations and iterations. No prescribed auxiliary question banks are supplied. The fixed input contains original target questions, scoring resources, curated historical trajectories and sparse public development reference scores.
+At least 100 unique scored questions must appear in the final evaluation.json. A batch call can answer multiple questions, but return separate question scores and evidence; a shared question counts once across targets. Pilot submissions may be smaller. Domain aggregates are compatibility diagnostics; the main requested outputs are separate predictions for each visible target. Never force all targets to share a ranking.
+Budget: researcher $100; development candidate/helper tests $100 shared across all domains; final whole program <=$30 per candidate. Research time is 10 hours. Standardized candidate prices are frozen from the existing DeepInfra/OpenAI snapshots; actual reseller invoices are separate. The gateway retains unknown usage reservations. Use your own testing schedule; a final revision need not be retested and the controller will not initiate additional development measurements. Keep optional fitted predictor assets if you do not have final-version development measurements.
+The five visible references are heterogeneous public target measurements, not one same-protocol matrix. GDPval-AA scores use Elo units. Do not invent missing references or use heldout labels. The historical trajectories may use different model/harness versions. Original task source availability does not imply all upstream environments run unchanged in this sandbox. Keep limitations visible.
+Use the executable SDK/contract for development calls and helper graders, retain job IDs and original responses, and distinguish completed empty/wrong answers from infrastructure errors. Save your experimental reasoning, observations and versions; do not repeatedly rerun completed wrong/empty answers. Final assets must be self-contained. You may obtain additional task resources if needed through the available tools; no source family is prescribed. Do not fetch candidate scores or hidden-target data.

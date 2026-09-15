@@ -1,0 +1,107 @@
+{
+  "models": [
+    "development-01",
+    "development-06",
+    "development-08",
+    "development-12"
+  ],
+  "auxiliary_models": [
+    {
+      "id": "helper-grader",
+      "roles": [
+        "grader"
+      ],
+      "price": {
+        "input": 5,
+        "output": 30,
+        "cache_read_multiplier": 0.1,
+        "cache_write_multiplier": 1,
+        "long_context": {
+          "threshold_tokens": 272000,
+          "input_multiplier": 2,
+          "output_multiplier": 1.5
+        }
+      },
+      "effort": "xhigh"
+    },
+    {
+      "id": "helper-simulator",
+      "roles": [
+        "simulator",
+        "grader"
+      ],
+      "price": {
+        "cache_read_multiplier": 0.25,
+        "input": 0.06,
+        "output": 0.18
+      },
+      "effort": "max"
+    }
+  ],
+  "targets": {
+    "terminalbench-2.1": {
+      "scale": 1,
+      "domain": "coding",
+      "scores": {
+        "development-01": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE",
+        "development-06": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE",
+        "development-08": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE",
+        "development-12": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE"
+      }
+    },
+    "deepswe-1.1": {
+      "scale": 1,
+      "domain": "coding",
+      "scores": {
+        "development-01": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE",
+        "development-06": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE",
+        "development-08": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE"
+      }
+    },
+    "gdpval-aa-v2": {
+      "scale": 1000,
+      "domain": "co-work",
+      "scores": {
+        "development-01": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE",
+        "development-06": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE",
+        "development-08": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE",
+        "development-12": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE"
+      }
+    },
+    "arxivmath-202606": {
+      "scale": 1,
+      "domain": "reasoning",
+      "scores": {
+        "development-01": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE",
+        "development-06": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE",
+        "development-08": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE",
+        "development-12": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE"
+      }
+    },
+    "hle-text": {
+      "scale": 1,
+      "domain": "reasoning",
+      "scores": {
+        "development-01": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE",
+        "development-06": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE",
+        "development-08": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE",
+        "development-12": "LOAD_FROM_MATCHING_PRIVATE_REFERENCE"
+      }
+    }
+  },
+  "domains": {
+    "coding": [
+      "terminalbench-2.1",
+      "deepswe-1.1"
+    ],
+    "co-work": [
+      "gdpval-aa-v2"
+    ],
+    "reasoning": [
+      "arxivmath-202606",
+      "hle-text"
+    ]
+  },
+  "budget_usd": 100,
+  "minimum_items": 100
+}
