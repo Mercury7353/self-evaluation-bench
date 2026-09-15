@@ -316,3 +316,15 @@ def test_completed_development_job_is_read_after_deadline_without_resubmission(t
     assert rows[0]['score_status']=='valid' and calls==['/research/jobs/existing-job']
     rows=supervisor.run_jobs({'gateway_socket':'unused'},'scoped',['not-submitted'],'submission',tmp_path,1)
     assert rows[0]['score_status']=='incomplete' and len(calls)==1
+
+
+def test_separate_acceptance_concurrency(tmp_path):
+    from seb.experiment import build_gateway
+    path,_=fixture_config(tmp_path)
+    raw=yaml.safe_load(path.read_text());raw['evaluation']['model_concurrency']=2
+    raw['evaluation']['acceptance_model_concurrency']=4
+    path.write_text(yaml.safe_dump(raw));cfg=load(path)
+    out=tmp_path/'separate';out.mkdir()
+    config,_=build_gateway(cfg,cfg['researchers'][0],out,tmp_path/'gateway.sock',mock_url='http://localhost:9')
+    assert config['suite_concurrency']==2
+    assert config['acceptance_suite_concurrency']==4

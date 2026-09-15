@@ -281,7 +281,8 @@ def research_app(config):
             (index/ident).touch()
         async def background():
             try:
-                limit=config.get('suite_concurrency',1) if kind=='suite' else config.get('agent_concurrency',1)
+                limit=(config.get('acceptance_suite_concurrency',config.get('suite_concurrency',1))
+                       if entry['wallet']=='evaluation' else config.get('suite_concurrency',1)) if kind=='suite' else config.get('agent_concurrency',1)
                 lock=locks.setdefault((entry['wallet'],kind),asyncio.Semaphore(limit))
                 async with lock:
                     write_json(out/'result.json',{'id':ident,'status':'running','started':time.time(),'submission_id':submission_id})

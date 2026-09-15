@@ -219,6 +219,7 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
         'require_item_budgets':True,'allow_pilots':True,'suite_cost_cap_usd':budget['suite_usd'],
         'item_cost_cap_usd':budget['item_usd'],'suite_cost_goal_usd':budget['suite_usd'],
         'suite_timeout':cfg['evaluation']['seconds'],'suite_concurrency':cfg['evaluation']['model_concurrency'],
+        'acceptance_suite_concurrency':cfg['evaluation']['acceptance_model_concurrency'],
         'request_concurrency_per_model':cfg['evaluation']['requests_per_model'],
         'max_pending_suites':max(len(cfg['models'])*2,8),'reservation_wait_seconds':15,
         'research_deadline_epoch':time.time()+cfg['design']['seconds'],
@@ -523,7 +524,7 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
                 update(phase='acceptance')
                 acceptance_models=[m for m in cfg['models'] if not cfg.get('domain_protocol') or m['split']=='holdout']
                 pending_models={m['id']:m['pending_reason'] for m in acceptance_models if m.get('availability')=='pending'}
-                results=run_jobs(config,tokens['evaluation'],[m['id'] for m in acceptance_models if m['id'] not in pending_models],'suite',
+                results=run_jobs(dict(config,suite_concurrency=config['acceptance_suite_concurrency']),tokens['evaluation'],[m['id'] for m in acceptance_models if m['id'] not in pending_models],'suite',
                     out/'acceptance-jobs',time.time()+cfg['evaluation']['seconds'])
                 update(phase='scoring')
                 if cfg.get('domain_protocol'):

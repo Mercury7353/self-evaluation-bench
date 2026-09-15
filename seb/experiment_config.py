@@ -163,7 +163,8 @@ def load(path, *, resolve_inputs=True):
     if 'final_development_measurement' in design and type(design['final_development_measurement']) is not bool:
         raise ValueError('final_development_measurement must be boolean')
     evaluation=cfg.setdefault('evaluation',{});evaluation.setdefault('seconds',7200);evaluation.setdefault('model_concurrency',2);evaluation.setdefault('requests_per_model',2)
-    for k in ['seconds','model_concurrency','requests_per_model']:
+    evaluation.setdefault('acceptance_model_concurrency',evaluation['model_concurrency'])
+    for k in ['seconds','model_concurrency','requests_per_model','acceptance_model_concurrency']:
         if type(evaluation[k]) is not int or evaluation[k]<1:raise ValueError('evaluation.'+k+' must be a positive integer')
     evaluation.setdefault('preflight',False)
     if type(evaluation['preflight']) is not bool:raise ValueError('evaluation.preflight must be boolean')

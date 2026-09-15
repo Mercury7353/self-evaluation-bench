@@ -11,3 +11,5 @@ This is a new, separately metered Sol run authorized on 2026-09-15. The [base in
 - Any closed research/development accounting wallet is a fault, not a normal successful early stop.
 
 Full immutable attempt traces and the continuation decision journal live outside Git. Parent trace files project the final attempt; earlier failure events are never deleted. Research reports belong in MyContext.
+
+User update after launch: subsequent acceptance panels should set `evaluation.acceptance_model_concurrency: 4`, retaining development concurrency 2. The archived config here is the exact original running configuration and is not silently edited. This pilot has eight candidates (four development, four holdout); it is not the earlier expanded model panel.
