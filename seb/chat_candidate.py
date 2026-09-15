@@ -133,6 +133,11 @@ class CandidateAdapter:
         if stop not in ('stop','length','tool_calls','content_filter'):
             raise ValueError('Chat response lacks supported terminal finish_reason')
         usage=response.get('usage') or {};output=chat_output_tokens(usage)
+        if output is None and self.backend.get('allow_unreconciled_usage'):
+            # Raw provider usage is preserved and gateway charge stays unknown.
+            # Translation only needs explicit nonnegative input/output counts.
+            if all(type(usage.get(k)) is int and usage[k]>=0 for k in ('prompt_tokens','completion_tokens')):
+                output=usage['completion_tokens']
         if output is None:raise ValueError('Missing or ambiguous native token usage')
         details=usage.get('prompt_tokens_details') or {}
         cached=details.get('cached_tokens') or 0;written=details.get('cache_write_tokens') or 0

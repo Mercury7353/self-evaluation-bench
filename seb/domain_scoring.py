@@ -110,8 +110,8 @@ def score_domain(config, source, development_results, acceptance_results, models
     try:
         if not (source/'predictor.py').is_file():
             raise ValueError('Domain submission must include its visible-target predictor; no automatic replacement')
-        if not train:
-            raise ValueError('No complete final-snapshot development observations')
+        if not train and not config.get('allow_empty_development_predictor',False):
+            raise ValueError('No complete final-snapshot development observations or saved predictor assets')
         submitted = output/'visible-predictor'; submitted.mkdir()
         shutil.copy2(source/'predictor.py', submitted/'predictor.py')
         if (source/'predictor_assets').is_dir():

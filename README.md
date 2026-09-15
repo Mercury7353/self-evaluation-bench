@@ -414,3 +414,20 @@ SEB_TEST_ROOT="$SEB_ROOTFS" SEB_TEST_SCIENCE="$SEB_SCIENCE_PACKAGES" pytest -q
 ```
 
 Runtime tests use only synthetic fixtures and local fake providers. A collaborator must separately validate their provider's streaming/tool-use compatibility and verified prices before scaling paid experiments.
+
+## Flexible joint research protocol
+
+`domain_protocol.version: 3` accepts varying target counts per domain. Set
+`design.minimum_items: 100` to require independently declared/scored final items;
+`pilot=True` still allows small development prototypes. With
+`design.final_development_measurement: false`, finalization only polls/reuses
+existing measurements of the exact selected snapshot and does not initiate new
+development tests. The predictor may receive an empty training list and use its
+own frozen fitted assets; no hidden labels are exposed.
+
+A candidate may opt into `allow_unreconciled_usage: true` to translate valid
+explicit prompt/completion counts despite inconsistent total tokens. Original
+usage is retained, billing stays unknown, and its full reservation remains held.
+This option does not turn uncertain usage into a zero-cost call. A researcher
+price can opt into `budget_cache_discount: true` for cache-aware Responses budget
+settlement; pre-request reservations remain conservative.

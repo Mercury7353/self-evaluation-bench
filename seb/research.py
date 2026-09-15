@@ -138,7 +138,7 @@ def run_suite(source,model,token,config,output,entry):
         if config.get('require_item_budgets'):
             child_entry.update(budget_scopes={**entry.get('budget_scopes',{}),
                                'suite:'+scope:entry.get('suite_cost_cap_usd',config['suite_cost_cap_usd'])},
-                               item_scope_prefix='item:'+scope+':',allowed_item_ids=list({i.get('budget_group',i['id']) for i in manifest['items']}))
+                               item_scope_prefix='item:'+scope+':',allowed_item_ids=list({i['id'] for i in manifest['items']} | {i.get('budget_group',i['id']) for i in manifest['items']}),item_budget_groups={i['id']:i.get('budget_group',i['id']) for i in manifest['items']})
         config['tokens'][child_token]=child_entry
         context={'model':model,'token':child_token,'base_url':'http://127.0.0.1:18765',
                  'output_dir':'/workspace/raw',
@@ -236,7 +236,7 @@ def research_app(config):
                 item_id=request.headers.get('x-seb-item-id')
                 if not entry.get('item_scope_prefix') or item_id not in entry.get('allowed_item_ids',[]):
                     raise ValueError('Agent tasks require a declared item ID inside a budgeted suite or pilot')
-                agent_scopes[entry['item_scope_prefix']+hashlib.sha256(item_id.encode()).hexdigest()]=config['item_cost_cap_usd']
+                agent_scopes[entry['item_scope_prefix']+hashlib.sha256(entry.get('item_budget_groups',{}).get(item_id,item_id).encode()).hexdigest()]=config['item_cost_cap_usd']
             pilot=data.get('pilot',False)
             if type(pilot) is not bool:raise ValueError('pilot must be boolean')
             if pilot and (kind!='suite' or not entry.get('research') or not config.get('allow_pilots')):

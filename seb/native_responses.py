@@ -214,7 +214,7 @@ def install_routes(app, config, ledger, access):
             charge, estimate = None, None
             try:
                 if usage and terminal:
-                    charge = usage_cost(usage, price)
+                    charge = usage_cost(usage, price, cached=bool(price.get('budget_cache_discount',False)))
                     estimate = usage_cost(usage, price, cached=True)
             except (ValueError, KeyError, TypeError, AttributeError):
                 pass

@@ -33,8 +33,8 @@ def policy_for(config, entry=None):
     for key in ('min_output_tokens', 'max_output_tokens', 'default_output_tokens', 'infra_retries'):
         if type(policy[key]) is not int:
             raise ValueError(key + ' must be an integer')
-    if not 32768 <= policy['min_output_tokens'] <= policy['default_output_tokens'] <= policy['max_output_tokens'] <= 131072:
-        raise ValueError('Candidate output limits must satisfy 32768 <= min <= default <= max <= 131072')
+    if not 1 <= policy['min_output_tokens'] <= policy['default_output_tokens'] <= policy['max_output_tokens'] <= 131072:
+        raise ValueError('Candidate output limits must satisfy 1 <= min <= default <= max <= 131072')
     if not 3 <= policy['infra_retries'] <= 10:
         raise ValueError('infra_retries must be 3..10')
     for key in ('attempt_timeout_seconds', 'retry_backoff_seconds', 'retry_max_backoff_seconds'):
@@ -160,7 +160,7 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
     if entry.get('item_scope_prefix'):
         if item_id not in entry.get('allowed_item_ids', []):
             return JSONResponse({'error':'A declared x-seb-item-id is required'},400)
-        scopes[entry['item_scope_prefix']+hashlib.sha256(item_id.encode()).hexdigest()] = config['item_cost_cap_usd']
+        scopes[entry['item_scope_prefix']+hashlib.sha256(entry.get('item_budget_groups',{}).get(item_id,item_id).encode()).hexdigest()] = config['item_cost_cap_usd']
     adapter, upstream_body, upstream_path = None, None, request.url.path
     native_responses = backend.get('wire_api') == 'openai_responses'
     if backend.get('wire_api') in ('openai_responses','chat_completions'):

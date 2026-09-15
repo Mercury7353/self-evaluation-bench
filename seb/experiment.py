@@ -124,16 +124,16 @@ predictions, reference coverage, costs and infrastructure status are recorded di
 """
 
 JOINT_TASK = """You are researching one inexpensive evaluation across coding, co-work, and reasoning.
-All six visible target definitions and development resources are provided together in whitebox.json/resources.
+All visible target definitions and development resources are provided together in whitebox.json/resources.
 You have ONE continuous research run and ONE shared development budget. Allocate them yourself.
 You may select original tasks or cheap items, synthesize, rewrite, combine methods, or measure adaptively.
 Reuse tasks, tools, graders, and measurements across domains when useful. Domain grouping does not
 require separate runs or duplicate candidate calls. Only development candidates are accessible now.
-Submit one executable measurement, six visible-target predictions, and three frozen domain scores.
+Submit one executable measurement, per-visible-target predictions, and three frozen domain scores.
 Each held-out candidate runs the whole program once under the shared final cost cap. Each domain score
 (higher means better) is compared with undisclosed targets without target-specific fitting or sign changes.
-Measure your final submission on development candidates before the deadline; its predictor may use
-all six visible development labels and shared item observations. Freeze code, assets, and stopping rules.
+You decide whether and when to test each revision, including the final version. Your predictor may use
+visible development labels and your measured item observations. Freeze code, assets, and stopping rules.
 CONTRACT.md and the SDK provide executable interfaces; your research strategy and iteration are your choice.
 """
 
@@ -146,7 +146,7 @@ shared item or grader calls are counted once. Small development pilots may cover
 
 predictor.py is required. Its fit/predict code receives all visible development labels and anonymous
 item observations, but no undisclosed target names/labels or held-out labels. Cross-domain features and
-predictor_assets/ are allowed. Return predictions keyed by the six visible target IDs.
+predictor_assets/ are allowed. Return predictions keyed by the visible target IDs.
 
 The final evaluation.json must declare domain_aggregations for exactly the three domain IDs in
 whitebox.json. Reuse the same declared item in multiple domains without issuing additional calls:
@@ -180,7 +180,7 @@ def metadata(cfg, visibility):
 
 def joint_domains(cfg):
     protocol=cfg.get('domain_protocol',{})
-    if protocol.get('version')!=2:return None
+    if protocol.get('version') not in (2,3):return None
     return {d:{v:[t['id'] for t in cfg['benchmarks'][key] if t['domain']==d]
         for v,key in [('visible','whitebox'),('sealed','blackbox')]} for d in protocol['domains']}
 
@@ -209,13 +209,13 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
         'verifier_network':cfg['runtime'].get('verifier_network',False),'key_file':secretfiles[first_provider],
         'upstream':mock_url or first['upstream'],
         'prices':{m['id']:m['price'] for m in all_models},
-        'model_backends':{m['id']:{'model':m['model'],'key_file':secretfiles[m['provider']],
+        'model_backends':{m['id']:{'allow_unreconciled_usage':bool(m.get('allow_unreconciled_usage',False)),'model':m['model'],'key_file':secretfiles[m['provider']],
                             'upstream':mock_url or cfg['providers'][m['provider']]['upstream'],
                             **({'wire_api':cfg['providers'][m['provider']]['wire_api'],'effort':m['effort'],'native_limits':m['native_limits']}
                                if cfg['providers'][m['provider']].get('wire_api') in ('openai_responses','chat_completions') else {})} for m in all_models},
         'efforts':{m['id']:m['effort'] for m in all_models if m.get('effort')},
         'auxiliary_models':helper_ids,'auxiliary_model_info':auxiliary_view(cfg),
-        'evaluation_policy':cfg['evaluation']['policy'],'minimum_items':cfg['design']['minimum_items'],
+        'allow_empty_development_predictor':cfg.get('domain_protocol',{}).get('version')==3,'evaluation_policy':cfg['evaluation']['policy'],'minimum_items':cfg['design']['minimum_items'],
         'require_item_budgets':True,'allow_pilots':True,'suite_cost_cap_usd':budget['suite_usd'],
         'item_cost_cap_usd':budget['item_usd'],'suite_cost_goal_usd':budget['suite_usd'],
         'suite_timeout':cfg['evaluation']['seconds'],'suite_concurrency':cfg['evaluation']['model_concurrency'],
@@ -487,7 +487,11 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
                     reused=reused_jobs(config,[m['id'] for m in dev],source)
                     for model,job in reused.items():write(jobfolder/(model+'.job.json'),job)
                     update(phase='development_evaluation',round=index+1)
-                    results=run_jobs(config,tokens['development'],[m['id'] for m in dev],selected_path,jobfolder,deadline)
+                    if cfg['design'].get('final_development_measurement',True):
+                        results=run_jobs(config,tokens['development'],[m['id'] for m in dev],selected_path,jobfolder,deadline)
+                    else:
+                        results=run_jobs(config,tokens['development'],list(reused),selected_path,jobfolder,deadline)
+                        write(jobfolder/'results.json',results)
                     report=score_panel(config,checkpoint,results,dev,config['whitebox']['references'],config['whitebox']['targets'],
                         out/f'development-scores-{index+1}',overall=cfg['overall'],heldout=False)
                     # Give only visible-target feedback to the next round.

@@ -128,13 +128,13 @@ def load(path, *, resolve_inputs=True):
         if type(design[k]) is not int or design[k]<1:raise ValueError('design.'+k+' must be a positive integer')
     if 'domain_protocol' in cfg:
         protocol=cfg['domain_protocol']
-        if not isinstance(protocol,dict) or protocol.get('version') not in (1,2):
-            raise ValueError('domain_protocol.version must be 1 or 2')
+        if not isinstance(protocol,dict) or protocol.get('version') not in (1,2,3):
+            raise ValueError('domain_protocol.version must be 1, 2 or 3')
         if set(protocol)-{'version','minimum_models','minimum_families','domains','allow_pending_references'}:
             raise ValueError('Unknown domain_protocol field')
         if type(protocol.get('allow_pending_references',False)) is not bool:
             raise ValueError('domain_protocol.allow_pending_references must be boolean')
-        if protocol['version']==2:
+        if protocol['version'] in (2,3):
             domains=protocol.get('domains')
             if not isinstance(domains,list) or len(domains)!=3:
                 raise ValueError('Joint protocol requires three domain IDs')
@@ -150,6 +150,8 @@ def load(path, *, resolve_inputs=True):
             raise ValueError('Domain protocol uses one independent researcher run')
         if design['checkpoint_seconds']!=design['seconds']:
             raise ValueError('Domain researcher receives the full configured continuous time window')
+    if 'final_development_measurement' in design and type(design['final_development_measurement']) is not bool:
+        raise ValueError('final_development_measurement must be boolean')
     evaluation=cfg.setdefault('evaluation',{});evaluation.setdefault('seconds',7200);evaluation.setdefault('model_concurrency',2);evaluation.setdefault('requests_per_model',2)
     for k in ['seconds','model_concurrency','requests_per_model']:
         if type(evaluation[k]) is not int or evaluation[k]<1:raise ValueError('evaluation.'+k+' must be a positive integer')
@@ -166,12 +168,12 @@ def load(path, *, resolve_inputs=True):
     if not targets.get('whitebox') or not targets.get('blackbox'):raise ValueError('Both whitebox and blackbox targets are required')
     if cfg.get('domain_protocol',{}).get('version')==1 and any(len(targets[v])!=2 for v in ['whitebox','blackbox']):
         raise ValueError('Domain protocol requires two visible and two sealed targets')
-    if cfg.get('domain_protocol',{}).get('version')==2:
+    if cfg.get('domain_protocol',{}).get('version') in (2,3):
         domains=cfg['domain_protocol']['domains']
         for visibility in ['whitebox','blackbox']:
             if any(t.get('domain') not in domains for t in targets[visibility]):
                 raise ValueError('Each joint target needs a declared domain')
-            if any(sum(t['domain']==d for t in targets[visibility])!=2 for d in domains):
+            if cfg['domain_protocol']['version']==2 and any(sum(t['domain']==d for t in targets[visibility])!=2 for d in domains):
                 raise ValueError('Joint protocol requires two visible and two sealed targets per domain')
     for visibility in ['whitebox','blackbox']:
         for target in targets[visibility]:
@@ -242,7 +244,7 @@ def researcher_view(cfg):
                  'scores':{m:s for m,s in cfg['_references'][t['id']].items() if m in development}}
         for t in cfg['benchmarks']['whitebox']},
         **({'domains':{d:[t['id'] for t in cfg['benchmarks']['whitebox'] if t['domain']==d]
-             for d in cfg['domain_protocol']['domains']}} if cfg.get('domain_protocol',{}).get('version')==2 else {}),
+             for d in cfg['domain_protocol']['domains']}} if cfg.get('domain_protocol',{}).get('version') in (2,3) else {}),
         'budget_usd':cfg['budgets']['development_usd'],'minimum_items':cfg['design']['minimum_items']}
 
 
