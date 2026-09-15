@@ -367,7 +367,8 @@ def accounting(out, cfg):
 
 
 def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=False, resume_research=False,
-        migration_handoff=None):
+        migration_handoff=None, resume_verified_preflight=False):
+    if sum([resume_prelaunch,resume_research,resume_verified_preflight])>1:raise ValueError("Choose one recovery mode")
     if resume_prelaunch and resume_research:raise ValueError('Choose one recovery mode')
     if migration_handoff and not resume_research:raise ValueError('Migration must preserve the research context')
     cfg=load(config_path)
@@ -387,6 +388,9 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
     if resume_prelaunch:
         from .prelaunch_recovery import archive_unstarted,restore_ledger
         recovery=archive_unstarted(out,cfg,researcher['id'])
+    if resume_verified_preflight:
+        from .prelaunch_recovery import archive_verified_preflight,restore_ledger
+        recovery=archive_verified_preflight(out,cfg,researcher['id'])
     if resume_research:
         from .research_continuation import prepare_continuation
         continuation=prepare_continuation(out,cfg,researcher,handoff=migration_handoff)
@@ -418,7 +422,7 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
                     if 'deadline_epoch' in entry:entry['deadline_epoch']=original_clock['original_deadline_epoch']
             process=start_gateway(config,out)
             try:
-                if cfg['evaluation']['preflight'] and not continuation:
+                if cfg['evaluation']['preflight'] and not continuation and not (recovery and recovery.get('preflight_offline_verified')):
                     update(phase='preflight')
                     readiness=out/'readiness';readiness.mkdir()
                     mock_submission(readiness)

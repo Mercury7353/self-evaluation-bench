@@ -52,3 +52,47 @@ def restore_ledger(recovery, output):
     if destination.exists():raise ValueError('Never overwrite a recovered ledger')
     with sqlite3.connect(original.resolve().as_uri()+'?mode=ro',uri=True) as source:
         with sqlite3.connect(destination) as target:source.backup(target)
+
+
+def archive_verified_preflight(output, cfg, researcher_id):
+    """Continue a failed transport-only preflight after validating saved responses.
+
+    No response is regenerated or rescored and no uncertain charge is released.
+    Only the initial preflight is eligible, before any researcher invocation.
+    """
+    output=Path(output)
+    state=json.loads((output/'state.json').read_text())
+    if state.get('phase')!='failed' or state.get('researcher')!=researcher_id or state.get('error')!='RuntimeError: Model transport preflight incomplete; no researcher launched':
+        raise ValueError('Not a failed transport-only preflight')
+    if list(output.glob('researcher-trace-*')) or (output/'researcher-work').exists():
+        raise ValueError('Researcher must not have started')
+    if json.loads((output/'provenance.json').read_text())['config_sha256']!=cfg['_config_sha256']:
+        raise ValueError('Preflight recovery cannot change configuration')
+    deadline=state['started']+cfg['design']['seconds']
+    if deadline<=time.time():raise ValueError('Original deadline expired')
+    ledger=output/'gateway/ledger.sqlite'
+    with sqlite3.connect(ledger.resolve().as_uri()+'?mode=ro',uri=True) as db:
+        rows=db.execute('SELECT id,wallet,model,state FROM calls').fetchall()
+        if not rows or any(wallet!='development' for _,wallet,_,_ in rows):raise ValueError('Only preflight calls allowed')
+        candidates={m['id'] for m in cfg['models']}
+        if {m for _,_,m,_ in rows}!=candidates:raise ValueError('Incomplete candidate preflight coverage')
+        for ident,_,model,status in rows:
+            if status=='completed':continue
+            if status!='response_translation_error':raise ValueError('Unresolved nontranslation failure')
+            folder=output/'gateway/wire'/ident;meta=json.loads((folder/'meta.json').read_text());raw=(folder/'response.body').read_bytes()
+            if meta['http_status']!=200 or hashlib.sha256(raw).hexdigest()!=meta['response_sha256']:raise ValueError('Invalid saved response')
+            from .chat_candidate import CandidateAdapter
+            import tempfile
+            response=json.loads(raw)
+            with tempfile.TemporaryDirectory() as temp:
+                adapter=CandidateAdapter(temp,{'model':response.get('model'),'effort':'max','allow_unreconciled_usage':True},model,'offline')
+                adapter.translate(response,False)
+        wallets=dict(db.execute('SELECT name,cap FROM wallets').fetchall())
+        for name,key in [('designer','researcher_usd'),('development','development_usd'),('evaluation','evaluation_usd')]:
+            if wallets.get(name)!=cfg['budgets'][key]:raise ValueError('Wallet cap changed')
+    parent=output.parent/'preflight-attempts'/output.name
+    if parent.exists():raise ValueError('One transport preflight continuation only')
+    parent.mkdir(parents=True);archive=parent/'attempt-1';output.rename(archive)
+    return {'archive':str(archive),'original_started':state['started'],'original_deadline_epoch':deadline,
+            'prior_model_calls':len(rows),'preflight_offline_verified':True,'recovered_at':time.time(),
+            'reason':'Saved HTTP200 responses verified offline; raw results, usage, ledger rows and unknown reservations preserved; no repeated calls'}
