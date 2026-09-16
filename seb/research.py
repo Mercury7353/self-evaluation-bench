@@ -125,6 +125,12 @@ def run_suite(source,model,token,config,output,entry):
         protocol=policy_for(config,entry)
         manifest=load_manifest(source,entry.get('minimum_items',config.get('minimum_items',100)),
             domains=None if entry.get('_pilot') else config.get('joint_domains'), minimum_questions=0 if entry.get('_pilot') else config.get('minimum_questions',0)) if protocol else None
+        resume={}
+        if config.get('score_mode')=='raw_domain':
+            from .measurement_resume import collect
+            resume=collect(config,source,model,output.parent.name)
+            write_json(output/'resume-provenance.json',{k:v for k,v in resume.items() if k!='replies'})
+            if resume['active_jobs']:raise ValueError('Same frozen model measurement still active: '+str(resume['active_jobs']))
         work=output/'workspace';shutil.copytree(source,work)
         if digest_tree(work)!=before:raise ValueError('Submission changed while snapshotting')
         (output/'submission.sha256.json').write_text(json.dumps(before,indent=2))
@@ -139,10 +145,17 @@ def run_suite(source,model,token,config,output,entry):
             child_entry.update(budget_scopes={**entry.get('budget_scopes',{}),
                                'suite:'+scope:entry.get('suite_cost_cap_usd',config['suite_cost_cap_usd'])},
                                item_scope_prefix='item:'+scope+':',allowed_item_ids=list({i['id'] for i in manifest['items']} | {i.get('budget_group',i['id']) for i in manifest['items']}),item_budget_groups={i['id']:i.get('budget_group',i['id']) for i in manifest['items']})
+        if resume:
+            groups=resume['item_budget_groups'];done=resume['completed_items']
+            blocked={g for g in groups.values() if all(i in done for i,v in groups.items() if v==g)}
+            child_entry['completed_item_ids']=list(set(done)|blocked)
+            cap=config['suite_cost_cap_usd']
+            child_entry['budget_scopes']['suite:'+scope]=max(1e-12,cap-resume['prior_encumbered_usd'])
         config['tokens'][child_token]=child_entry
         context={'model':model,'token':child_token,'base_url':'http://127.0.0.1:18765',
                  'output_dir':'/workspace/raw',
                  'efforts':{m:config.get('efforts',{}).get(m) for m in child_entry['models']},'budget_usd':entry['cap']}
+        if resume:context['measurement_resume']={k:resume[k] for k in ['completed_items','replies','item_budget_groups','agents','agent_results']}
         if protocol:
             context.update(public_contract(config,child_entry),execution_id=scope,seed=config.get('evaluation_seed',0),
                            submission_sha256=before)
@@ -159,12 +172,17 @@ def run_suite(source,model,token,config,output,entry):
         state['returncode']=rc
         if rc:raise RuntimeError('Submitted program failed; see program stdout/stderr')
         result=json.loads((work/'result.json').read_text())
+        if resume:
+            # Completed historical grades are authoritative; no regrading/best-of selection.
+            rows={r['id']:r for r in result.get('items',[])};rows.update(resume['completed_items'])
+            result['items']=[rows[i['id']] for i in manifest['items'] if i['id'] in rows]
+
         ledger=Ledger(Path(config['artifacts'])/'ledger.sqlite')
         if protocol:
-            result=normalize_result(result,manifest,ledger,entry['wallet'],started,Path(config['artifacts']).parent/'research-jobs',candidate_model=model)
+            result=normalize_result(result,manifest,ledger,entry['wallet'],started,Path(config['artifacts']).parent/'research-jobs',candidate_model=model,prior_evidence=resume.get('prior_evidence'))
             if config.get('require_item_budgets'):
                 from .evidence import check_budget_evidence
-                check_budget_evidence(result,manifest,ledger,scope,Path(config['artifacts']).parent/'research-jobs')
+                check_budget_evidence(result,manifest,ledger,scope,Path(config['artifacts']).parent/'research-jobs',prior_evidence=resume.get('prior_evidence'))
         else:
             validate_result(result,ledger,entry['wallet'],started,Path(config['artifacts']).parent/'research-jobs')
         wallet=ledger.status(entry['wallet'])[0]
@@ -234,6 +252,7 @@ def research_app(config):
             agent_scopes=dict(entry.get('budget_scopes',{}))
             if kind=='agent' and config.get('require_item_budgets'):
                 item_id=request.headers.get('x-seb-item-id')
+                if item_id in entry.get('completed_item_ids',[]):raise ValueError('Completed frozen item cannot start another agent call')
                 if not entry.get('item_scope_prefix') or item_id not in entry.get('allowed_item_ids',[]):
                     raise ValueError('Agent tasks require a declared item ID inside a budgeted suite or pilot')
                 agent_scopes[entry['item_scope_prefix']+hashlib.sha256(entry.get('item_budget_groups',{}).get(item_id,item_id).encode()).hexdigest()]=config['item_cost_cap_usd']
@@ -271,7 +290,7 @@ def research_app(config):
         snapshot=out/'submitted';shutil.copytree(path,snapshot)
         submission_id=hashlib.sha256(json.dumps(digest_tree(snapshot),sort_keys=True).encode()).hexdigest()
         (out/'request.json').write_text(json.dumps({'kind':kind,'model':model,'wallet':entry['wallet'],'created':time.time(),'path':str(path),
-                                                  'submission_id':submission_id,'pilot':pilot,
+                                                  'submission_id':submission_id,'pilot':pilot,'client_request':dict(data,path=rel),
                                                   'cache_sample_path':entry['cache_sample_path'],
                                                   **({'budget_scopes':agent_scopes} if kind=='agent' and config.get('require_item_budgets') else {}),
                                                   'candidate_output_tokens':output_tokens if kind=='agent' else None}))
@@ -285,9 +304,13 @@ def research_app(config):
                        if entry['wallet']=='evaluation' else config.get('suite_concurrency',1)) if kind=='suite' else config.get('agent_concurrency',1)
                 lock=locks.setdefault((entry['wallet'],kind),asyncio.Semaphore(limit))
                 async with lock:
-                    write_json(out/'result.json',{'id':ident,'status':'running','started':time.time(),'submission_id':submission_id})
-                    if kind=='suite':result=await asyncio.to_thread(run_suite,snapshot,model,token,config,out/'execution',
-                        dict(entry,minimum_items=1,_pilot=True) if pilot else entry)
+                    if kind!='suite':write_json(out/'result.json',{'id':ident,'status':'running','started':time.time(),'submission_id':submission_id})
+                    if kind=='suite':
+                        measurement_lock=locks.setdefault(('measurement',model,submission_id),asyncio.Lock())
+                        async with measurement_lock:
+                            write_json(out/'result.json',{'id':ident,'status':'running','started':time.time(),'submission_id':submission_id})
+                            result=await asyncio.to_thread(run_suite,snapshot,model,token,config,out/'execution',
+                                dict(entry,minimum_items=1,_pilot=True) if pilot else entry)
                     else:
                         agent_token=uuid.uuid4().hex
                         config['tokens'][agent_token]=dict(entry,research=False,allow_suite=False,models=[model],candidate_models=[model],

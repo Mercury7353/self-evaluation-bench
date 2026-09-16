@@ -328,3 +328,48 @@ def test_separate_acceptance_concurrency(tmp_path):
     config,_=build_gateway(cfg,cfg['researchers'][0],out,tmp_path/'gateway.sock',mock_url='http://localhost:9')
     assert config['suite_concurrency']==2
     assert config['acceptance_suite_concurrency']==4
+
+
+def test_raw_full_panel_resumes_partial_dev_without_repeating_answers(tmp_path,monkeypatch):
+    root=os.environ.get('SEB_TEST_ROOT');science=os.environ.get('SEB_TEST_SCIENCE')
+    if not root or not science:pytest.skip('Set sandbox paths for raw full-panel integration')
+    import seb.experiment as experiment
+    from seb.supervisor import run_jobs
+    from seb.ledger import Ledger
+    import time
+    path,cfg=joint_fixture(tmp_path)
+    cfg['runtime']={'rootfs':root,'science_packages':science}
+    cfg['domain_protocol']['score_mode']='raw_domain';cfg['overall']={'metric':'macro_pearson','source':'raw_domain'}
+    cfg['design']['final_development_measurement']=False
+    cfg['design']['seconds']=cfg['design']['checkpoint_seconds']=120
+    original=experiment.mock_submission
+    def submission(work):
+        original(work);source=work/'submission';p=source/'evaluation.json';manifest=json.loads(p.read_text())
+        manifest['questions']=[{'id':'sum','prompt':'What is 2 + 2?'},{'id':'product','prompt':'What is 2 * 3?'}]
+        for row in manifest['items']:row['question_id']=row['id']
+        manifest['domain_aggregations']={d:{'kind':'weighted_mean','weights':{'sum':1,'product':1}} for d in ['coding','co-work','reasoning']}
+        p.write_text(json.dumps(manifest))
+        program=(source/'run.py').read_text()
+        # Deliberate process failure after persisting the first measured item.
+        program += "\n"
+        program=program.replace("temp.replace(path)","temp.replace(path)\n    if c.context['model']=='dev-a' and ident=='sum' and not c.completed_items:raise RuntimeError('fixture interruption after answer')")
+        (source/'run.py').write_text(program)
+        config=json.loads((work.parent/'gateway.private.json').read_text());access=json.loads((work/'access.json').read_text())
+        rows=run_jobs(config,access['token'],['dev-a','dev-b'],'submission',work.parent/'fixture-development',time.time()+90)
+        assert {x['model']:x['status'] for x in rows}=={'dev-a':'error','dev-b':'ok'}
+    monkeypatch.setattr(experiment,'mock_submission',submission)
+    path.write_text(yaml.safe_dump(cfg));out=tmp_path/'raw-run'
+    result=experiment.run(path,None,out,mock=True)
+    assert result['complete_models']==result['expected_models']==6
+    assert result['predictor']=='not_used_raw_domain' and result['measurement_complete']
+    assert not list((out/'domain').glob('*predict*'))
+    accepted=json.loads((out/'acceptance-jobs/results.json').read_text())
+    assert {r['model'] for r in accepted}=={m['id'] for m in cfg['models']}
+    with Ledger(out/'gateway/ledger.sqlite').connect() as db:
+        calls={r['model']:r['n'] for r in db.execute('SELECT model,COUNT(*) n FROM calls GROUP BY model')}
+        assert calls=={m['id']:2 for m in cfg['models']}
+        wallets={r['wallet']:r['n'] for r in db.execute('SELECT wallet,COUNT(*) n FROM calls GROUP BY wallet')}
+        assert wallets=={'development':3,'evaluation':9}
+    for row in accepted:assert row['score_status']=='valid' and len(row['result']['items'])==2
+    report=json.loads((out/'domain/scores.json').read_text());assert report['metric']=='pearson'
+    assert 'Pearson' in (out/'researcher-work/CONTRACT.md').read_text()

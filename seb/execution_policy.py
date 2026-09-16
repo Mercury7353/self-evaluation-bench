@@ -157,6 +157,8 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
         return JSONResponse({'error':str(error)},400)
     scopes = dict(entry.get('budget_scopes', {}))
     item_id = request.headers.get('x-seb-item-id')
+    if item_id in entry.get('completed_item_ids',[]):
+        return JSONResponse({'error':{'type':'completed_item','message':'Reuse the prior completed frozen item; no new provider call allowed'}},409)
     if entry.get('item_scope_prefix'):
         if item_id not in entry.get('allowed_item_ids', []):
             return JSONResponse({'error':'A declared x-seb-item-id is required'},400)

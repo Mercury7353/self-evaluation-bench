@@ -99,7 +99,7 @@ def domain_outputs(raw, manifest):
     return {'domain_scores':scores,'domain_score_status':statuses}
 
 
-def check_evidence(item, ledger, wallet, started, jobs_root, *, completed, candidate_model=None):
+def check_evidence(item, ledger, wallet, started, jobs_root, *, completed, candidate_model=None, prior_evidence=None):
     evidence = item.get('evidence', [])
     if not isinstance(evidence, list) or (completed and not evidence):
         raise ValueError('Evaluated items require call/agent evidence')
@@ -112,7 +112,8 @@ def check_evidence(item, ledger, wallet, started, jobs_root, *, completed, candi
                 raise ValueError('Invalid evidence ID')
             if ev.get('kind') == 'llm':
                 row = db.execute('SELECT * FROM calls WHERE id=?', (ident,)).fetchone()
-                if not row or row['wallet'] != wallet or row['created'] < started:
+                trusted=item['id'] in (prior_evidence or {}).get(ident,{}).get('items',[])
+                if not row or (not trusted and (row['wallet'] != wallet or row['created'] < started)):
                     raise ValueError('Evidence outside this execution/wallet')
                 # Known answer delivery is distinct from whether billing usage arrived.
                 if completed and row['state'] != 'completed':
@@ -122,7 +123,8 @@ def check_evidence(item, ledger, wallet, started, jobs_root, *, completed, candi
                 folder = Path(jobs_root)/ident
                 request = json.loads((folder/'request.json').read_text())
                 result = json.loads((folder/'result.json').read_text())
-                if request['wallet'] != wallet or request['created'] < started:
+                trusted=item['id'] in (prior_evidence or {}).get(ident,{}).get('items',[])
+                if not trusted and (request['wallet'] != wallet or request['created'] < started):
                     raise ValueError('Agent evidence outside this execution/wallet')
                 if completed and result.get('status') != 'ok':
                     raise ValueError('Agent execution did not complete')
@@ -133,7 +135,7 @@ def check_evidence(item, ledger, wallet, started, jobs_root, *, completed, candi
         raise ValueError('Completed item requires evidence from the evaluated candidate, not only auxiliary models')
 
 
-def normalize_result(raw, manifest, ledger, wallet, started, jobs_root, *, candidate_model=None):
+def normalize_result(raw, manifest, ledger, wallet, started, jobs_root, *, candidate_model=None, prior_evidence=None):
     items = raw.get('items')
     if raw.get('protocol_version') != 1 or not isinstance(items, list):
         raise ValueError('Result requires protocol_version=1 and items')
@@ -171,7 +173,7 @@ def normalize_result(raw, manifest, ledger, wallet, started, jobs_root, *, candi
             complete = False
             if score is not None or answer != 'not_applicable':
                 raise ValueError('Unresolved execution is unscored, not a model answer')
-        check_evidence(item, ledger, wallet, started, jobs_root, completed=execution == 'completed',candidate_model=candidate_model)
+        check_evidence(item, ledger, wallet, started, jobs_root, completed=execution == 'completed',candidate_model=candidate_model,prior_evidence=prior_evidence)
     if not selected: raise ValueError('No selected items')
     for name, value in raw.get('capabilities', {}).items():
         if not isinstance(name, str) or not finite(value): raise ValueError('Invalid capability score')
@@ -207,6 +209,8 @@ def public_contract(config, entry):
                if config.get('response_cache') and entry['wallet'] in ('development','evaluation') else {}),
             **({'joint_domains':config['joint_domains']} if config.get('joint_domains') else {}),
             'minimum_items': config.get('minimum_items', 100),
+            'minimum_questions':config.get('minimum_questions',0),
+            **({'score_mode':'raw_domain','optimization_objective':'domain_macro_pearson','predictor_required':False,'acceptance_panel':'all_candidates'} if config.get('score_mode')=='raw_domain' else {}),
             'pilot_minimum_items': 1 if config.get('allow_pilots') and entry.get('research') else None,
             'suite_concurrency': config.get('suite_concurrency',1),
             'request_concurrency_per_model': config.get('request_concurrency_per_model'),

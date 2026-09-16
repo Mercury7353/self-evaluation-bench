@@ -5,6 +5,8 @@ import time
 import urllib.request
 import urllib.error
 import uuid
+import hashlib
+import copy
 from pathlib import Path
 
 
@@ -25,6 +27,8 @@ class Client:
     def __init__(self, context=None):
         path=context or os.environ.get('SEB_CONTEXT','/workspace/access.json')
         self.context=json.loads(Path(path).read_text())
+        self.resume=self.context.get('measurement_resume',{})
+        self.completed_items=copy.deepcopy(self.resume.get('completed_items',{}))
         self.base=os.environ.get('SEB_GATEWAY_URL') or self.context.get('base_url','http://127.0.0.1:18765')
         self.token=self.context['token']
         self.artifacts=Path(self.context.get('output_dir','/workspace/client-artifacts'))
@@ -69,6 +73,11 @@ class Client:
         if system:body['system']=system
         effort=self.context.get('efforts',{}).get(model)
         if effort:body['output_config']={'effort':effort}
+        group=self.resume.get('item_budget_groups',{}).get(item_id,item_id)
+        key=hashlib.sha256(json.dumps({'body':body,'group':group,'sample':sample_id},sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        if key in self.resume.get('replies',{}):return copy.deepcopy(self.resume['replies'][key])
+        if item_id in self.completed_items:
+            raise ValueError('Completed frozen item cannot issue another model call; reuse completed_items')
         operation_id=operation_id or uuid.uuid4().hex
         if not all(c.isalnum() or c in '_-' for c in operation_id) or not 1<=len(operation_id)<=128:
             raise ValueError('Invalid operation ID')
@@ -90,6 +99,7 @@ class Client:
         A grader API failure leaves the item incomplete without retrying its answer;
         other grader exceptions propagate as program defects, not wrong answers.
         """
+        if item_id in self.completed_items:return copy.deepcopy(self.completed_items[item_id])
         try:
             reply=self.chat(prompt,item_id=item_id,**kwargs)
         except EvaluationError as error:
@@ -122,9 +132,16 @@ class Client:
         if max_tokens is not None:
             if kind!='agent':raise ValueError('max_tokens applies to agent tasks only')
             body['max_output_tokens']=max_tokens
+        if kind=='agent':
+            normalized=dict(body,path=str(path).removeprefix('/workspace/'))
+            group=self.resume.get('item_budget_groups',{}).get(item_id,item_id)
+            key=hashlib.sha256(json.dumps({'body':{'agent':normalized},'group':group,'sample':None},sort_keys=True,separators=(',',':')).encode()).hexdigest()
+            if key in self.resume.get('agents',{}):return copy.deepcopy(self.resume['agents'][key])
+            if item_id in self.completed_items:raise ValueError('Completed item cannot launch another agent')
         return json.loads(self.request('/research/'+('suites' if kind=='suite' else 'agents'),body,item_id=item_id)[0])
 
     def status(self,job_id):
+        if job_id in self.resume.get('agent_results',{}):return copy.deepcopy(self.resume['agent_results'][job_id])
         return json.loads(self.request('/research/jobs/'+job_id)[0])
 
     def jobs(self):

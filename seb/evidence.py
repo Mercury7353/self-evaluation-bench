@@ -3,12 +3,13 @@ import hashlib
 import json
 from pathlib import Path
 
-def check_budget_evidence(result, manifest, ledger, scope, jobs):
+def check_budget_evidence(result, manifest, ledger, scope, jobs, *, prior_evidence=None):
     declared={i['id']:i.get('budget_group',i['id']) for i in manifest['items']}
     with ledger.connect() as db:
         for item in result['items']:
             expected='item:'+scope+':'+hashlib.sha256(declared[item['id']].encode()).hexdigest()
             for ev in item.get('evidence',[]):
+                if item['id'] in (prior_evidence or {}).get(ev['id'],{}).get('items',[]):continue
                 if ev['kind']=='llm':
                     found=db.execute('SELECT 1 FROM call_budget_scopes WHERE call_id=? AND scope=?',
                                      (ev['id'],expected)).fetchone()

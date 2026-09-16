@@ -226,6 +226,7 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
         'overall':cfg['overall'],
         'score_mode':cfg.get('domain_protocol',{}).get('score_mode','predicted_target'),
         'minimum_questions':cfg['design']['minimum_items'] if cfg.get('domain_protocol',{}).get('score_mode')=='raw_domain' else 0,
+        **({'isolate_model_overruns':True,'rate_limit_cooldown_seconds':60} if cfg.get('domain_protocol',{}).get('score_mode')=='raw_domain' else {}),
         **({'joint_domains':list(joint_domains(cfg))} if joint_domains(cfg) else {}),
         'whitebox':{'models':[m for m in cfg['models'] if m['split']=='development'],
             'references':{t:row['scores'] for t,row in researcher_view(cfg)['targets'].items()},
@@ -234,7 +235,7 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
                 'models':development+helper_ids,'candidate_models':development,
                 'workspace':str(out/'researcher-work'),'research':True,'deadline_epoch':time.time()+cfg['design']['seconds']},
             tokens['evaluation']:{'wallet':'evaluation','cap':budget['evaluation_usd'],
-                'models':[m['id'] for m in available if not cfg.get('domain_protocol') or m['split']=='holdout'],'workspace':str(out/'acceptance-input'),'allow_suite':True,'start_deadline_on_first_suite':cfg['evaluation']['seconds']}}}
+                'models':[m['id'] for m in available if not cfg.get('domain_protocol') or cfg.get('domain_protocol',{}).get('score_mode')=='raw_domain' or m['split']=='holdout'],'workspace':str(out/'acceptance-input'),'allow_suite':True,'start_deadline_on_first_suite':cfg['evaluation']['seconds']}}}
     if researcher:
         config['tokens'][tokens['designer']]={'wallet':'designer','cap':budget['researcher_usd'],
             'models':[researcher['id']],'deadline_epoch':config['research_deadline_epoch']}
@@ -526,9 +527,13 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
                 # Revoke researcher access before measuring the hidden panel.
                 (work/'access.json').unlink(missing_ok=True)
                 update(phase='acceptance')
-                acceptance_models=[m for m in cfg['models'] if not cfg.get('domain_protocol') or m['split']=='holdout']
+                acceptance_models=[m for m in cfg['models'] if not cfg.get('domain_protocol') or cfg.get('domain_protocol',{}).get('score_mode')=='raw_domain' or m['split']=='holdout']
                 pending_models={m['id']:m['pending_reason'] for m in acceptance_models if m.get('availability')=='pending'}
-                results=run_jobs(dict(config,suite_concurrency=config['acceptance_suite_concurrency']),tokens['evaluation'],[m['id'] for m in acceptance_models if m['id'] not in pending_models],'suite',
+                acceptance_runner=run_jobs
+                if config.get('score_mode')=='raw_domain':
+                    from .supervisor import complete_panel
+                    acceptance_runner=complete_panel
+                results=acceptance_runner(dict(config,suite_concurrency=config['acceptance_suite_concurrency']),tokens['evaluation'],[m['id'] for m in acceptance_models if m['id'] not in pending_models],'suite',
                     out/'acceptance-jobs',time.time()+cfg['evaluation']['seconds'])
                 update(phase='scoring')
                 if cfg.get('domain_protocol'):
@@ -539,6 +544,12 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
                         minimum_families=cfg['domain_protocol']['minimum_families'],domains=joint_domains(cfg),
                         reference_panels=cfg['_reference_panels'])
                     reports={'domain':report}
+                    if config.get('score_mode')=='raw_domain':
+                        from .raw_scoring import score_raw_panel
+                        reports['all_measured']=score_raw_panel(acceptance/'suite',results,cfg['models'],cfg['_references'],metadata(cfg,'whitebox'),out/'all-measured',minimum_models=cfg['domain_protocol']['minimum_models'])
+                        devmodels=[m for m in cfg['models'] if m['split']=='development']
+                        reports['development_measured']=score_raw_panel(acceptance/'suite',results,devmodels,cfg['_references'],metadata(cfg,'whitebox'),out/'development-measured',minimum_models=cfg['domain_protocol']['minimum_models'])
+
                 else:
                     reports={}
                     for visibility in ['whitebox','blackbox']:
@@ -609,5 +620,6 @@ Iteration objective: improve the Pearson correlation between directly measured d
 Development feedback reports the measured domain scores, unique-score counts, Pearson and Spearman against visible references.
 Use {"kind":"weighted_mean","weights":{"item_id":1.0}} for each domain_aggregations entry, or a frozen custom rule with declared item IDs and a method description; return custom results under domain_scores. Grade rules must depend on candidate responses, not candidate identity or target reference labels.
 Reference labels inform development only; acceptance scores use the same frozen item grading and aggregation for all models.
+Final acceptance measures ALL declared candidates, both development and held-out models, using the final frozen program. Development need not cover every model/version. Completed items from the identical program and model are reused unchanged; missing items are resumed by the controller. Use Client.item() for durable completed-item reuse. For custom multi-call tasks, skip IDs in client.completed_items and include those original rows unchanged in output. Client.chat() replays exact saved requests during resume; independent repeated samples require stable sample_id. Do not use time/randomness to bypass replay. Completed-item provider calls are blocked. Persist partial item results atomically. Resume is infrastructure recovery, not a new research iteration.
 Incomplete infrastructure results are not wrong answers. Preserve completed wrong/empty answers and report missing coverage.
 """

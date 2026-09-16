@@ -85,3 +85,27 @@ def freeze_program(source, destination):
     shutil.copytree(source,destination)
     if digest_tree(destination)!=hashes:raise ValueError('Submission changed during freezing')
     destination.with_suffix('.sha256.json').write_text(json.dumps(hashes,indent=2))
+
+
+def complete_panel(config, token, models, path, output, deadline):
+    """Measure the whole frozen panel; the gateway preserves prior answers on retries."""
+    output=Path(output);output.mkdir(parents=True,exist_ok=True)
+    final={};pending=list(models);round_number=1;unchanged={m:0 for m in models};previous={}
+    while pending and time.time()<deadline:
+        rows=run_jobs(config,token,pending,path,output/f'round-{round_number:03d}',deadline)
+        again=[]
+        for row in rows:
+            model=row['model'];final[model]=row
+            if row.get('score_status')=='valid':continue
+            result=row.get('result') or {};items=result.get('items',[])
+            count=sum(i.get('execution_status')=='completed' for i in items)
+            unchanged[model]=unchanged[model]+1 if previous.get(model)==count else 0;previous[model]=count
+            categories={i.get('error_category') for i in items}
+            budget_blocked=any(i.get('execution_status')=='budget_exhausted' for i in items)
+            permanent=bool(categories & {'configuration_or_quota_error','policy_error','model_accounting_guard','request_error'})
+            if not budget_blocked and not permanent and unchanged[model]<3:again.append(model)
+        write(output/'results.json',list(final.values()))
+        write(output/'coverage.json',{'round':round_number,'expected_models':models,'complete_models':[m for m,r in final.items() if r.get('score_status')=='valid'],'retrying':again,'checked':time.time()})
+        pending=again;round_number+=1
+        if pending:time.sleep(min(60,max(0,deadline-time.time())))
+    return [final.get(m,{'model':m,'status':'incomplete','score_status':'incomplete','reason':'execution_window'}) for m in models]
