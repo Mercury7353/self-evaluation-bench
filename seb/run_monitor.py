@@ -8,6 +8,24 @@ import time
 from pathlib import Path
 
 
+def concise_notice(info, plan):
+    phases={'preparing':'准备中','preflight':'接口预检','designing':'研究中','acceptance':'最终验收中',
+            'completed':'控制器已结束','failed':'控制器失败','incomplete':'验收未完整',
+            'pending_reference':'参考成绩未齐','pending_provider':'接口结果未齐'}
+    phase=info.get('phase','unknown')
+    lines=[f"新 Sol 自动监控：{phases.get(phase,phase)}；调度 {info.get('scheduler','unknown')}。"]
+    if phase=='designing':
+        lines.append('研究仍在进行，尚未形成最终全量验收结果。')
+    if info.get('alert')=='stalled':
+        lines.append(f"连续 {info.get('stalled_seconds',0)} 秒无新落盘记录，需要检查；不代表进程已停止。")
+    if info.get('model_guards'):
+        lines.append('有模型触发计费保护，需核对账本后处理。')
+    if info.get('alert')=='terminal':
+        lines.append('请核验逐题覆盖与终态，作业结束不等于全量测完。')
+    if plan.get('report_url'):lines.append('报告：'+plan['report_url'])
+    return '\n'.join(lines)
+
+
 def snapshot(root):
     root=Path(root);state={};p=root/'state.json'
     if p.exists():state=json.loads(p.read_text())
@@ -51,8 +69,9 @@ def main():
             alert= ('terminal' if terminal else 'model_guard' if info['model_guards'] else 'stalled' if info['stalled_seconds']>=300 else 'progress')
             info['alert']=alert
             (root/'monitor-heartbeat.json').write_text(json.dumps(info,indent=2))
-            if time.time()-last_send>=300 or alert!=last_alert and alert!='progress' or terminal:
-                note=root/'monitor-message.txt';note.write_text('Sol研究与全模型验收自动监控：'+json.dumps(info,ensure_ascii=False)+'\n报告：'+plan.get('report_url','https://github.com/Mercury7353/MyContext/blob/research/self-evaluation-benchmark/visualizations/sol-reprompt-3h-20260915.html'))
+            if time.time()-last_send>=plan.get('notification_interval_seconds',300) or alert!=last_alert and alert!='progress' or terminal:
+                message=concise_notice(info,plan) if plan.get('concise_notifications') else 'Sol研究与全模型验收自动监控：'+json.dumps(info,ensure_ascii=False)+'\n报告：'+plan.get('report_url','https://github.com/Mercury7353/MyContext/blob/research/self-evaluation-benchmark/visualizations/sol-reprompt-3h-20260915.html')
+                note=root/'monitor-message.txt';note.write_text(message)
                 sent=subprocess.run([sys.executable,a.discord_tool,'send','--session',a.session,'--text-file',str(note)],capture_output=True,text=True,timeout=40)
                 with (root/'monitor-delivery.jsonl').open('a') as f:f.write(json.dumps({'at':time.time(),'returncode':sent.returncode,'output':sent.stdout,'error':sent.stderr})+'\n')
                 last_send=time.time();last_alert=alert
