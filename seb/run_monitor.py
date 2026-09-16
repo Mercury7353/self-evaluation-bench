@@ -3,6 +3,7 @@ import argparse
 import json
 import subprocess
 import shutil
+import sys
 import time
 from pathlib import Path
 
@@ -11,7 +12,7 @@ def snapshot(root):
     root=Path(root);state={};p=root/'state.json'
     if p.exists():state=json.loads(p.read_text())
     jobs={}
-    for p in (root/'research-jobs').glob('*/request.json'):
+    for p in root.glob('**/research-jobs/*/request.json'):
         request=json.loads(p.read_text());result=json.loads((p.parent/'result.json').read_text())
         rows=(result.get('result') or {}).get('items',[])
         partial=p.parent/'execution/workspace/result.json'
@@ -42,13 +43,14 @@ def main():
                 result=subprocess.run([shutil.which('sacct') or '/apps/slurm/current/bin/sacct','-j',job,'--noheader','--format=JobIDRaw,State','-P'],capture_output=True,text=True,timeout=20)
                 info['scheduler']=next((line.split('|')[1] for line in result.stdout.splitlines() if line.split('|')[0]==job),'unknown')
             terminal=info['phase'] in ('completed','failed') or info.get('scheduler') in ('FAILED','CANCELLED','TIMEOUT','OUT_OF_MEMORY')
+            if any(j['state'] in ('running','queued') for j in info['jobs'].values()) and time.time()<deadline:terminal=False
             alert= ('terminal' if terminal else 'model_guard' if info['model_guards'] else 'stalled' if info['stalled_seconds']>=300 else 'progress')
             info['alert']=alert
             (root/'monitor-heartbeat.json').write_text(json.dumps(info,indent=2))
             if time.time()-last_send>=300 or alert!=last_alert and alert!='progress' or terminal:
                 note=root/'monitor-message.txt';note.write_text('Sol冻结补测自动监控：'+json.dumps(info,ensure_ascii=False)+'\n报告：https://github.com/Mercury7353/MyContext/blob/research/self-evaluation-benchmark/visualizations/sol-reprompt-3h-20260915.html')
-                sent=subprocess.run(['python3',a.discord_tool,'send','--session',a.session,'--text-file',str(note)],capture_output=True,text=True,timeout=40)
-                with (root/'monitor-delivery.jsonl').open('a') as f:f.write(json.dumps({'at':time.time(),'returncode':sent.returncode,'output':sent.stdout})+'\n')
+                sent=subprocess.run([sys.executable,a.discord_tool,'send','--session',a.session,'--text-file',str(note)],capture_output=True,text=True,timeout=40)
+                with (root/'monitor-delivery.jsonl').open('a') as f:f.write(json.dumps({'at':time.time(),'returncode':sent.returncode,'output':sent.stdout,'error':sent.stderr})+'\n')
                 last_send=time.time();last_alert=alert
             if terminal or time.time()>deadline+180:break
         except Exception as e:

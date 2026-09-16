@@ -26,7 +26,10 @@ def prepare(source, destination, previous, model):
     (destination/'selection.json').write_text(json.dumps({'model':model,'missing':sorted(missing),'retained':sorted(kept)},indent=2))
     manifest['items']=[i for i in manifest['items'] if i['id'] in missing]
     for agg in manifest.get('domain_aggregations',{}).values():
-        if 'weights' in agg:agg['weights']={k:v for k,v in agg['weights'].items() if k in missing}
+        if 'weights' in agg:
+            agg['weights']={k:v for k,v in agg['weights'].items() if k in missing}
+            # Partial wrapper scores are discarded; only original per-item grades are merged.
+            if not agg['weights'] and missing:agg['weights']={sorted(missing)[0]:1.0}
     (destination/'evaluation.json').write_text(json.dumps(manifest,indent=2))
     (destination/'run.py').write_text('''import argparse,json,concurrent.futures
 from pathlib import Path
