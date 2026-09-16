@@ -2,6 +2,7 @@
 import argparse
 import json
 import subprocess
+import shutil
 import time
 from pathlib import Path
 
@@ -38,7 +39,7 @@ def main():
             jobfile=root/'submission.json'
             if jobfile.exists():
                 job=json.loads(jobfile.read_text())['stdout'].strip().split(';')[0]
-                result=subprocess.run(['sacct','-j',job,'--noheader','--format=JobIDRaw,State','-P'],capture_output=True,text=True,timeout=20)
+                result=subprocess.run([shutil.which('sacct') or '/apps/slurm/current/bin/sacct','-j',job,'--noheader','--format=JobIDRaw,State','-P'],capture_output=True,text=True,timeout=20)
                 info['scheduler']=next((line.split('|')[1] for line in result.stdout.splitlines() if line.split('|')[0]==job),'unknown')
             terminal=info['phase'] in ('completed','failed') or info.get('scheduler') in ('FAILED','CANCELLED','TIMEOUT','OUT_OF_MEMORY')
             alert= ('terminal' if terminal else 'model_guard' if info['model_guards'] else 'stalled' if info['stalled_seconds']>=300 else 'progress')
