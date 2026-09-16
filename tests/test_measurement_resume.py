@@ -53,3 +53,45 @@ def test_sdk_replays_completed_agent_instead_of_relaunch(tmp_path,monkeypatch):
     p=tmp_path/'context';p.write_text(json.dumps(context));client=Client(p)
     monkeypatch.setattr(client,'request',lambda *a,**k:pytest.fail('Repeated agent request'))
     assert client.agent('/workspace/tasks/demo',item_id='q')['result']==result
+
+
+def test_recovered_empty_response_is_resumed_as_zero_without_provider_request(tmp_path,monkeypatch):
+    from seb.translation_recovery import recover_empty_cache_response
+    root=tmp_path;gateway=root/'gateway';ledger=Ledger(gateway/'ledger.sqlite')
+    ledger.wallet('evaluation',10)
+    job='a'*32;call='1'*32;op='original-operation'
+    folder=root/'research-jobs'/job;source=folder/'submitted';source.mkdir(parents=True)
+    manifest={'protocol_version':1,'items':[{'id':'q1'}],'aggregation':{'kind':'weighted_mean'}}
+    (source/'evaluation.json').write_text(json.dumps(manifest));(source/'run.py').write_text('pass')
+    (folder/'request.json').write_text(json.dumps({'kind':'suite','model':'m','wallet':'evaluation',
+        'created':time.time()-1,'submission_id':fingerprint(source)}))
+    (folder/'result.json').write_text(json.dumps({'status':'error','result':{'items':[]}}))
+    group='item:'+job+':'+hashlib.sha256(b'q1').hexdigest()
+    ledger.reserve(call,'evaluation','m',.1,scopes={'suite:'+job:5,group:1})
+    usage={'prompt_tokens':225,'completion_tokens':2500,'total_tokens':2784,
+        'prompt_tokens_details':{'cached_tokens':256}}
+    ledger.finish(call,None,usage,'response_translation_error')
+    wire=gateway/'wire'/call;wire.mkdir(parents=True)
+    body={'model':'m','max_tokens':2048,'messages':[{'role':'user','content':'q1'}]}
+    raw=json.dumps({'id':'original-answer','choices':[{'finish_reason':'length',
+        'message':{'role':'assistant','content':''}}],'usage':usage}).encode()
+    (wire/'request.body').write_text(json.dumps(body));(wire/'response.body').write_bytes(raw)
+    (wire/'meta.json').write_text(json.dumps({'operation_id':op,'wallet':'evaluation','model':'m',
+        'state':'response_translation_error','http_status':200,'response_sha256':hashlib.sha256(raw).hexdigest()}))
+    operation=gateway/'operations'/hashlib.sha256(('evaluation\0'+op).encode()).hexdigest();operation.mkdir(parents=True)
+    (operation/'result.json').write_text(json.dumps({'http_status':422,'headers':{'x-seb-request-id':call},
+        'attempts':[{'id':call,'state':'response_translation_error','retryable':False}]}))
+    (operation/'response.body').write_text('{"error":"response_translation_error"}')
+    recover_empty_cache_response(gateway,call)
+    state=collect({'artifacts':str(gateway),'run_root':str(root)},source,'m','b'*32)
+    assert state['prior_encumbered_usd']==.1
+    ctx=root/'context';ctx.write_text(json.dumps({'model':'m','token':'fixture',
+        'output_dir':str(root/'raw'),'measurement_resume':state}))
+    client=Client(ctx);monkeypatch.setattr(client,'request',lambda *a,**k:pytest.fail('Repeated provider request'))
+    item=client.item('q1','q1',lambda text:1)
+    assert item['score']==0 and item['answer_status']=='missing'
+    assert item['finish_reason']=='max_tokens' and item['evidence']==[{'kind':'llm','id':call}]
+    result=normalize_result({'protocol_version':1,'items':[item]},manifest,ledger,'evaluation',time.time(),
+        root/'research-jobs',candidate_model='m',prior_evidence=state['prior_evidence'])
+    assert result['score']==0
+    assert ledger.status('evaluation')[0]['calls']==1
