@@ -225,6 +225,7 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
         'research_deadline_epoch':time.time()+cfg['design']['seconds'],
         'overall':cfg['overall'],
         'score_mode':cfg.get('domain_protocol',{}).get('score_mode','predicted_target'),
+        'minimum_questions':cfg['design']['minimum_items'] if cfg.get('domain_protocol',{}).get('score_mode')=='raw_domain' else 0,
         **({'joint_domains':list(joint_domains(cfg))} if joint_domains(cfg) else {}),
         'whitebox':{'models':[m for m in cfg['models'] if m['split']=='development'],
             'references':{t:row['scores'] for t,row in researcher_view(cfg)['targets'].items()},
@@ -600,6 +601,7 @@ CONTRACT.md specifies measurement and feedback interfaces. Research strategy and
 RAW_DOMAIN_CONTRACT = """
 # Direct measured-score protocol
 Required outputs: run.py, evaluation.json, question/grader assets, and README.md.
+The final manifest must contain at least 100 distinct questions under questions: [{"id":"q1","prompt":"actual task prompt"}, ...]. Every scored item must reference its question_id. Multiple rubric items for one task count as ONE question. Shared tasks across domains count once. Exact duplicate prompts and unscored placeholder questions are rejected; semantic duplication is additionally audited. Pilots can use fewer questions.
 Declare exactly the three domain_aggregations in whitebox.json, with frozen scoring rules and weights.
 A domain score comes directly from observed item grades. Reuse it for every reference benchmark in that domain.
 No predictor.py, fitted target-score conversion, reference-scale calibration, or post-hoc clipping is requested or executed.

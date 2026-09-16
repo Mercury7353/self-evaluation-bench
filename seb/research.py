@@ -124,7 +124,7 @@ def run_suite(source,model,token,config,output,entry):
         before=validate_submission(source)
         protocol=policy_for(config,entry)
         manifest=load_manifest(source,entry.get('minimum_items',config.get('minimum_items',100)),
-            domains=None if entry.get('_pilot') else config.get('joint_domains')) if protocol else None
+            domains=None if entry.get('_pilot') else config.get('joint_domains'), minimum_questions=0 if entry.get('_pilot') else config.get('minimum_questions',0)) if protocol else None
         work=output/'workspace';shutil.copytree(source,work)
         if digest_tree(work)!=before:raise ValueError('Submission changed while snapshotting')
         (output/'submission.sha256.json').write_text(json.dumps(before,indent=2))
@@ -261,7 +261,7 @@ def research_app(config):
             if kind=='suite':
                 validate_submission(path)
                 if policy_for(config,entry):load_manifest(path,1 if pilot else config.get('minimum_items',100),
-                    domains=None if pilot else config.get('joint_domains'))
+                    domains=None if pilot else config.get('joint_domains'), minimum_questions=0 if pilot else config.get('minimum_questions',0))
             else:
                 from harbor.models.task.task import Task
                 digest_tree(path);Task(path)

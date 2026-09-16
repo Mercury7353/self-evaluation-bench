@@ -53,7 +53,7 @@ class ResearchLifecycle:
         temporary = self.root / 'staging'
         try:
             hashes = validate_submission(self.source)
-            load_manifest(self.source, self.minimum_items, domains=self.config.get('joint_domains'))
+            load_manifest(self.source, self.minimum_items, domains=self.config.get('joint_domains'), minimum_questions=self.config.get('minimum_questions',0))
             required = ['run.py'] + (['predictor.py'] if self.require_predictor else [])
             for name in required:
                 ast.parse((self.source / name).read_text(), filename=name)

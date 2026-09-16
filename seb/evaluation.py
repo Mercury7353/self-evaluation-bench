@@ -8,7 +8,7 @@ def finite(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
-def load_manifest(source, minimum_items=100, *, domains=None):
+def load_manifest(source, minimum_items=100, *, domains=None, minimum_questions=0):
     data = json.loads((Path(source)/'evaluation.json').read_text())
     if data.get('protocol_version') != 1:
         raise ValueError('evaluation.json requires protocol_version=1')
@@ -25,6 +25,25 @@ def load_manifest(source, minimum_items=100, *, domains=None):
         if not finite(item.get('weight', 1)) or item.get('weight', 1) <= 0:
             raise ValueError('Item weights must be positive and finite')
     if len(set(ids)) != len(ids): raise ValueError('Duplicate declared item IDs')
+    if minimum_questions or 'questions' in data:
+        questions=data.get('questions',[])
+        if not isinstance(questions,list) or len(questions)<minimum_questions:
+            raise ValueError(f'Manifest requires at least {minimum_questions} independent questions, not rubric items')
+        qids=set();texts=set()
+        for question in questions:
+            if not isinstance(question,dict) or not isinstance(question.get('id'),str) or not question['id'] or question['id'] in qids:
+                raise ValueError('Question IDs must be unique nonempty strings')
+            prompt=question.get('prompt')
+            if not isinstance(prompt,str) or not prompt.strip():raise ValueError('Each question must declare its actual task prompt')
+            text=' '.join(prompt.split()).casefold()
+            if text in texts:raise ValueError('Duplicate task prompts do not count as independent questions')
+            qids.add(question['id']);texts.add(text)
+        used=set()
+        for item in items:
+            qid=item.get('question_id')
+            if qid not in qids:raise ValueError('Each scored item must reference a declared question_id')
+            used.add(qid)
+        if used!=qids:raise ValueError('Every declared independent question must have scored items')
     if data.get('aggregation', {}).get('kind') not in ('weighted_mean', 'custom'):
         raise ValueError('Declare weighted_mean or custom aggregation')
     if data.get('selection', 'fixed') not in ('fixed', 'adaptive'):

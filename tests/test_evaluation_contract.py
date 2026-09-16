@@ -199,3 +199,20 @@ def test_queue_reports_running_and_only_queued_jobs_can_cancel(tmp_path,monkeypa
             assert client.post(route,headers=headers).json()['status']=='cancelled'
         finally:release.set()
     assert len(calls)==1
+
+
+def test_independent_question_minimum_not_rubric_count(tmp_path):
+    data={'protocol_version':1,'aggregation':{'kind':'weighted_mean'},
+          'questions':[{'id':'q','prompt':'One independent task'}],
+          'items':[{'id':str(i),'question_id':'q'} for i in range(100)]}
+    path=tmp_path/'evaluation.json';path.write_text(json.dumps(data))
+    with pytest.raises(ValueError,match='independent questions'):load_manifest(tmp_path,100,minimum_questions=100)
+    data['questions']=[{'id':str(i),'prompt':f'Compute {i} squared'} for i in range(100)]
+    for i,item in enumerate(data['items']):item['question_id']=str(i)
+    path.write_text(json.dumps(data));assert len(load_manifest(tmp_path,100,minimum_questions=100)['questions'])==100
+    data['questions'][1]['prompt']='  compute   0 squared '
+    path.write_text(json.dumps(data))
+    with pytest.raises(ValueError,match='Duplicate task prompts'):load_manifest(tmp_path,100,minimum_questions=100)
+    data['questions'][1]['prompt']='Compute 1 squared';data['items'][0]['question_id']='absent'
+    path.write_text(json.dumps(data))
+    with pytest.raises(ValueError,match='question_id'):load_manifest(tmp_path,100,minimum_questions=100)
