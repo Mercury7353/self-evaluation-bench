@@ -18,6 +18,9 @@ def with_constants(summary):
 
 
 def score_panel(config, source, results, models, references, targets, output, *, overall=None, heldout=True):
+    if config.get('score_mode')=='raw_domain':
+        from .raw_scoring import score_raw_panel
+        return score_raw_panel(source,results,models,references,targets,output,minimum_models=(overall or {}).get('minimum_models',3))
     output=Path(output);output.mkdir(parents=True,exist_ok=True)
     by_id={r['model']:r for r in results}
     rows=[model_row(m['id'],m['family'],by_id.get(m['id'],{}),

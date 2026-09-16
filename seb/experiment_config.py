@@ -140,8 +140,12 @@ def load(path, *, resolve_inputs=True):
         protocol=cfg['domain_protocol']
         if not isinstance(protocol,dict) or protocol.get('version') not in (1,2,3):
             raise ValueError('domain_protocol.version must be 1, 2 or 3')
-        if set(protocol)-{'version','minimum_models','minimum_families','domains','allow_pending_references'}:
+        if set(protocol)-{'version','minimum_models','minimum_families','domains','allow_pending_references','score_mode'}:
             raise ValueError('Unknown domain_protocol field')
+        if protocol.get('score_mode','predicted_target') not in ('predicted_target','raw_domain'):
+            raise ValueError('Invalid domain_protocol.score_mode')
+        if protocol.get('score_mode')=='raw_domain' and protocol.get('version') not in (2,3):
+            raise ValueError('raw_domain requires a joint domain protocol')
         if type(protocol.get('allow_pending_references',False)) is not bool:
             raise ValueError('domain_protocol.allow_pending_references must be boolean')
         if protocol['version'] in (2,3):
@@ -171,7 +175,9 @@ def load(path, *, resolve_inputs=True):
     if 'judge_usd' in budgets:positive(budgets['judge_usd'],'budgets.judge_usd')
     evaluation['policy']=DEFAULT_POLICY | evaluation.get('policy',{});policy_for({'evaluation_policy':evaluation['policy']})
     overall=cfg.setdefault('overall',{});overall.setdefault('metric','macro_spearman');overall.setdefault('source','family_cv');overall.setdefault('minimum_models',3);overall.setdefault('constant_prediction','zero')
-    if overall['metric']!='macro_spearman' or overall['source'] not in ['family_cv','raw_mean']:raise ValueError('overall uses macro_spearman with source family_cv or raw_mean')
+    if overall['metric']!='macro_spearman' or overall['source'] not in ['family_cv','raw_mean','raw_domain']:raise ValueError('overall uses macro_spearman with source family_cv, raw_mean or raw_domain')
+    if cfg.get('domain_protocol',{}).get('score_mode')=='raw_domain':overall['source']='raw_domain'
+    elif overall['source']=='raw_domain':raise ValueError('raw_domain source requires raw_domain protocol mode')
     if type(overall['minimum_models']) is not int or overall['minimum_models']<3:raise ValueError('overall.minimum_models must be at least 3')
     if overall['constant_prediction'] not in ['zero','undefined']:raise ValueError('constant_prediction must be zero or undefined')
     targets=cfg.get('benchmarks',{});seen=set();cfg['_references']={};cfg['_reference_hashes']={}

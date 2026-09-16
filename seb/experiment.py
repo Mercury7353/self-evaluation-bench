@@ -224,6 +224,7 @@ def build_gateway(cfg, researcher, out, socket, *, mock_url=None):
         'max_pending_suites':max(len(cfg['models'])*2,8),'reservation_wait_seconds':15,
         'research_deadline_epoch':time.time()+cfg['design']['seconds'],
         'overall':cfg['overall'],
+        'score_mode':cfg.get('domain_protocol',{}).get('score_mode','predicted_target'),
         **({'joint_domains':list(joint_domains(cfg))} if joint_domains(cfg) else {}),
         'whitebox':{'models':[m for m in cfg['models'] if m['split']=='development'],
             'references':{t:row['scores'] for t,row in researcher_view(cfg)['targets'].items()},
@@ -268,6 +269,8 @@ def prepare_workspace(cfg, config, tokens, out, *, resume=False):
     if cfg.get('domain_protocol'):
         contract=CONTRACT.split('The platform reports raw-score correlations')[0]
         contract=contract.replace('Optional `predictor.py` contract:', 'Required `predictor.py` contract:')+(JOINT_CONTRACT if joint_domains(cfg) else DOMAIN_CONTRACT)
+    if config.get('score_mode')=='raw_domain':
+        contract=CONTRACT.split('Optional `predictor.py` contract:')[0]+RAW_DOMAIN_CONTRACT
     (work/'CONTRACT.md').write_text(contract)
     shutil.copy2(Path(__file__).with_name('research_sdk.py'),work/'research_sdk.py')
     for target in cfg['benchmarks']['whitebox']:
@@ -439,7 +442,7 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
                 checkpoints=[];feedback_file=None
                 deadline=config['research_deadline_epoch']
                 lifecycle=ResearchLifecycle(config,work,out,researcher['id'],
-                    minimum_items=cfg['design']['minimum_items'],require_predictor=bool(cfg.get('domain_protocol')),
+                    minimum_items=cfg['design']['minimum_items'],require_predictor=bool(cfg.get('domain_protocol')) and config.get('score_mode')!='raw_domain',
                     resume=bool(continuation),started=state['started'] if continuation else None)
                 research_outcome=None
                 for index in range(cfg['design']['rounds']):
@@ -451,7 +454,7 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
                         mock_submission(work)
                         rc=0
                     else:
-                        prompt=(JOINT_TASK if joint_domains(cfg) else DOMAIN_TASK if cfg.get('domain_protocol') else TASK)
+                        prompt=(RAW_DOMAIN_TASK if config.get('score_mode')=='raw_domain' else JOINT_TASK if joint_domains(cfg) else DOMAIN_TASK if cfg.get('domain_protocol') else TASK)
                         prompt+=f'\nRemaining total research time: {remaining} seconds.\n' if cfg.get('domain_protocol') else f'\nEach checkpoint is limited to {cfg["design"]["checkpoint_seconds"]} seconds.\nThis is round {index+1}/{cfg["design"]["rounds"]}. Remaining design time: {remaining} seconds.\n'
                         if researcher.get('prompt_file'):prompt+='\nOperator task instructions:\n'+Path(researcher['prompt_file']).read_text()
                         if feedback_file:prompt+='\nReview the previous white-box feedback at '+feedback_file+' and revise if useful.\n'
@@ -518,7 +521,7 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
                 write(out/'freeze.json',{'selected_round':checkpoints[-1]['round'],'policy':'last_valid_round',
                     'files':digest_tree(acceptance/'suite'),'frozen_at':time.time(),
                     'research_snapshot':checkpoints[-1]['research_snapshot'],'research_outcome':research_outcome,
-                    'predictor':'submitted' if (source/'predictor.py').is_file() else ('missing_required_predictor' if cfg.get('domain_protocol') else 'fixed_ridge_baseline')})
+                    'predictor':'not_used_raw_domain' if config.get('score_mode')=='raw_domain' else 'submitted' if (source/'predictor.py').is_file() else ('missing_required_predictor' if cfg.get('domain_protocol') else 'fixed_ridge_baseline')})
                 # Revoke researcher access before measuring the hidden panel.
                 (work/'access.json').unlink(missing_ok=True)
                 update(phase='acceptance')
@@ -544,7 +547,7 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
                 bill=accounting(out,cfg)
                 overall=({'metric':'visible_utility','score':reports['domain']['visible_utility'],
                     'sealed_utility':reports['domain']['sealed_utility'],
-                    'source':'joint_protocol_v2' if joint_domains(cfg) else 'domain_protocol_v1'}
+                    'source':'raw_domain' if config.get('score_mode')=='raw_domain' else 'joint_protocol_v2' if joint_domains(cfg) else 'domain_protocol_v1'}
                     if cfg.get('domain_protocol') else reports['blackbox']['overall'])
                 available_complete=len(results)==len(acceptance_models)-len(pending_models) and all(r.get('score_status')=='valid' for r in results)
                 complete=available_complete and not pending_models
@@ -587,3 +590,22 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
         (out/'researcher-work/access.json').unlink(missing_ok=True)
         signal.signal(signal.SIGTERM,prior)
     return result
+
+
+RAW_DOMAIN_TASK = """Design and iteratively improve one low-cost executable benchmark across coding, co-work and reasoning.
+Return independently scored items and three frozen measured domain scores. Do not submit a target-score predictor.
+Use development measurements and feedback to evaluate score discrimination and agreement with reference benchmark rankings.
+CONTRACT.md specifies measurement and feedback interfaces. Research strategy and task construction are your choice.
+"""
+RAW_DOMAIN_CONTRACT = """
+# Direct measured-score protocol
+Required outputs: run.py, evaluation.json, question/grader assets, and README.md.
+Declare exactly the three domain_aggregations in whitebox.json, with frozen scoring rules and weights.
+A domain score comes directly from observed item grades. Reuse it for every reference benchmark in that domain.
+No predictor.py, fitted target-score conversion, reference-scale calibration, or post-hoc clipping is requested or executed.
+Iteration objective: improve the Spearman rank correlation between directly measured domain scores and visible reference scores across development models. Average target correlations within each domain, then weight the three domains equally. Pearson, score gaps and tied-pair counts are diagnostics. A constant measured score has undefined correlation and zero ranking utility; missing infrastructure coverage stays explicit. A high average task score is not rewarded by itself.
+Development feedback reports the measured domain scores, unique-score counts, Pearson and Spearman against visible references.
+Use {"kind":"weighted_mean","weights":{"item_id":1.0}} for each domain_aggregations entry, or a frozen custom rule with declared item IDs and a method description; return custom results under domain_scores. Grade rules must depend on candidate responses, not candidate identity or target reference labels.
+Reference labels inform development only; acceptance scores use the same frozen item grading and aggregation for all models.
+Incomplete infrastructure results are not wrong answers. Preserve completed wrong/empty answers and report missing coverage.
+"""

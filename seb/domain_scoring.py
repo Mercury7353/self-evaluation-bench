@@ -107,25 +107,30 @@ def score_domain(config, source, development_results, acceptance_results, models
     test = [model_row(m['id'], m['family'], by_test.get(m['id'], {}), {}) for m in held]
     test = [r for r in test if r['complete_source_coverage']]
     predictions = {}; error = None
-    try:
-        if not (source/'predictor.py').is_file():
-            raise ValueError('Domain submission must include its visible-target predictor; no automatic replacement')
-        if not train and not config.get('allow_empty_development_predictor',False):
-            raise ValueError('No complete final-snapshot development observations or saved predictor assets')
-        submitted = output/'visible-predictor'; submitted.mkdir()
-        shutil.copy2(source/'predictor.py', submitted/'predictor.py')
-        if (source/'predictor_assets').is_dir():
-            shutil.copytree(source/'predictor_assets', submitted/'predictor_assets')
-        # No sealed IDs, labels, real candidate IDs or families enter the payload.
-        payload = {'training': training(train, tasks), 'observations': [measurement(r, tasks) for r in test],
-                   'targets': visible_targets}
-        raw = isolated(config, submitted, payload, output/'visible-prediction')
-        if len(raw) != len(test):
-            raise ValueError('Wrong prediction count')
-        predictions = {r['id']: {t: p[t]['score'] for t in visible_targets if 'score' in p.get(t, {})}
-                       for r, p in zip(test, raw)}
-    except Exception as exc:
-        error = type(exc).__name__ + ': ' + str(exc)
+    if config.get('score_mode')=='raw_domain':
+        from .raw_scoring import measured_panel
+        measured=measured_panel(source,acceptance_results)
+        predictions={m['id']:{t:measured.get(d,{}).get(m['id']) for d,group in (domains or {}).items() for t in group['visible']} for m in held}
+    else:
+        try:
+            if not (source/'predictor.py').is_file():
+                raise ValueError('Domain submission must include its visible-target predictor; no automatic replacement')
+            if not train and not config.get('allow_empty_development_predictor',False):
+                raise ValueError('No complete final-snapshot development observations or saved predictor assets')
+            submitted = output/'visible-predictor'; submitted.mkdir()
+            shutil.copy2(source/'predictor.py', submitted/'predictor.py')
+            if (source/'predictor_assets').is_dir():
+                shutil.copytree(source/'predictor_assets', submitted/'predictor_assets')
+            # No sealed IDs, labels, real candidate IDs or families enter the payload.
+            payload = {'training': training(train, tasks), 'observations': [measurement(r, tasks) for r in test],
+                       'targets': visible_targets}
+            raw = isolated(config, submitted, payload, output/'visible-prediction')
+            if len(raw) != len(test):
+                raise ValueError('Wrong prediction count')
+            predictions = {r['id']: {t: p[t]['score'] for t in visible_targets if 'score' in p.get(t, {})}
+                           for r, p in zip(test, raw)}
+        except Exception as exc:
+            error = type(exc).__name__ + ': ' + str(exc)
     if domains is None:
         domain_scores = {m['id']: by_test[m['id']]['result'].get('score') for m in held
                          if by_test.get(m['id'], {}).get('score_status') == 'valid'}
@@ -134,6 +139,7 @@ def score_domain(config, source, development_results, acceptance_results, models
     else:
         domain_scores={d:{m['id']:by_test[m['id']]['result']['domain_scores'][d] for m in held
             if by_test.get(m['id'],{}).get('result',{}).get('domain_score_status',{}).get(d)=='valid'} for d in domains}
+        if config.get('score_mode')=='raw_domain':domain_scores=measured
         report=summarize_joint(models,references,domains,predictions,domain_scores,
             minimum_models=minimum_models,minimum_families=minimum_families,reference_panels=reference_panels)
     # Trusted scoring input, never mounted into researcher/predictor execution.
@@ -146,9 +152,12 @@ def score_domain(config, source, development_results, acceptance_results, models
         'predictions':predictions,'domain_scores':domain_scores,
         'minimum_models':minimum_models,'minimum_families':minimum_families,
         'submission_sha256':digest_tree(source)})
-    report.update(predictions=predictions, domain_scores=domain_scores,
+    report.update(score_mode=config.get('score_mode','predicted_target'), predictions=predictions, domain_scores=domain_scores,
                   predictor_error=error, development_models=len(train),
                   complete_models=len(test), expected_models=len(held))
+    if config.get('score_mode')=='raw_domain':
+        report.pop('predictions',None)
+        report['note']='Direct measured domain scores for visible and sealed references; no predictor fitting or execution.'
     write(output/'scores.json', report)
     return report
 

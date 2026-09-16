@@ -1,0 +1,410 @@
+version: 1
+name: sol-raw-measured-contract-20260915
+runtime:
+  rootfs: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/joint-campaign-20260913/runtime/science-07/rootfs
+  science_packages: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/joint-campaign-20260913/runtime/science-07/.venv/lib/python3.12/site-packages
+  image_cache: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/images
+  verifier_network: true
+providers:
+  openai:
+    wire_api: openai_responses
+    upstream: https://api.openai.com/v1
+    key_env: SEB_OPENAI_KEY
+  vectorengine:
+    wire_api: chat_completions
+    upstream: https://api.vectorengine.ai/v1
+    key_env: SEB_VECTORENGINE_KEY
+models:
+- discovery_status: listed_authenticated
+  family: openai
+  id: development-01
+  inference_verified: false
+  label: GPT-5.5
+  model: gpt-5.5-2026-04-23
+  model_key: gpt-5.5
+  provider: openai
+  split: development
+  price:
+    input: 5
+    output: 30
+    cache_read_multiplier: 0.1
+    cache_write_multiplier: 1
+    long_context:
+      threshold_tokens: 272000
+      input_multiplier: 2
+      output_multiplier: 1.5
+  effort: xhigh
+  native_limits:
+    max_context_tokens: 1050000
+    max_output_tokens: 128000
+- discovery_status: listed_public
+  family: zai
+  id: development-06
+  inference_verified: false
+  label: GLM-5.2
+  model: glm-5.2
+  model_key: glm-5.2
+  price:
+    cache_read_multiplier: 0.18666667
+    input: 0.75
+    output: 2.4
+  provider: vectorengine
+  split: development
+  effort: max
+  native_limits:
+    max_context_tokens: 1048576
+    max_output_tokens: 131072
+  allow_unreconciled_usage: true
+- discovery_status: listed_public
+  family: deepseek
+  id: development-08
+  inference_verified: false
+  label: DeepSeek V4 Flash-0731
+  model: deepseek-v4-flash-0731
+  model_key: deepseek-v4-flash-0731
+  price:
+    cache_read_multiplier: 0.25
+    input: 0.06
+    output: 0.18
+  provider: vectorengine
+  split: development
+  effort: max
+  native_limits:
+    max_context_tokens: 1048576
+    max_output_tokens: 131072
+- discovery_status: listed_public
+  family: qwen
+  id: development-12
+  inference_verified: false
+  label: Qwen3.8 Max
+  model: qwen3.8-max
+  model_key: qwen3.8-max
+  price:
+    cache_read_multiplier: 0.12484848
+    input: 1.65
+    output: 4.951
+    reservation_output_floor: 131072
+  provider: vectorengine
+  split: development
+  effort: max
+  native_limits:
+    max_context_tokens: 256000
+    max_output_tokens: 131072
+- discovery_status: listed_authenticated
+  family: openai
+  id: holdout-01
+  inference_verified: false
+  label: GPT-6 Astra
+  model: gpt-6-astra
+  model_key: gpt-6-astra
+  provider: openai
+  split: holdout
+  price:
+    input: 10
+    output: 50
+    cache_read_multiplier: 0.1
+    cache_write_multiplier: 1.25
+    long_context:
+      threshold_tokens: 272000
+      input_multiplier: 2
+      output_multiplier: 1.5
+    budget_cache_discount: true
+  effort: xhigh
+  native_limits:
+    max_context_tokens: 1050000
+    max_output_tokens: 128000
+- discovery_status: listed_authenticated
+  family: openai
+  id: holdout-02
+  inference_verified: false
+  label: GPT-5.6 Sol
+  model: gpt-5.6-sol
+  model_key: gpt-5.6-sol
+  provider: openai
+  split: holdout
+  price: &id001
+    input: 4
+    output: 20
+    cache_read_multiplier: 0.1
+    cache_write_multiplier: 1.25
+    long_context:
+      threshold_tokens: 272000
+      input_multiplier: 2
+      output_multiplier: 1.5
+    budget_cache_discount: true
+  effort: max
+  native_limits: &id002
+    max_context_tokens: 1050000
+    max_output_tokens: 128000
+- discovery_status: listed_public
+  family: moonshot
+  id: holdout-07
+  inference_verified: false
+  label: Kimi K3
+  model: kimi-k3
+  model_key: kimi-k3
+  price:
+    cache_read_multiplier: 0.1
+    input: 2.85
+    output: 14.25
+  provider: vectorengine
+  split: holdout
+  effort: max
+  native_limits:
+    max_context_tokens: 1048576
+    max_output_tokens: 131072
+  allow_unreconciled_usage: true
+- discovery_status: listed_public
+  family: mimo
+  id: holdout-11
+  inference_verified: false
+  label: MiMo V2.5 Pro
+  model: mimo-v2.5-pro
+  model_key: mimo-v2.5-pro
+  price:
+    cache_read_multiplier: 0.2
+    input: 1.0
+    output: 3.0
+  provider: vectorengine
+  split: holdout
+  effort: max
+  native_limits:
+    max_context_tokens: 1048576
+    max_output_tokens: 131072
+researchers:
+- discovery_status: listed_authenticated
+  family: openai
+  harness: codex
+  id: r-gpt-5.6-sol
+  inference_verified: false
+  label: GPT-5.6 Sol
+  model: gpt-5.6-sol
+  provider: openai
+  price: *id001
+  effort: max
+  native_limits: *id002
+  prompt_file: /nfs/hpc/share/zhanyaol/self-evaluation-bench-restart-20260915/contracts/2026-09-15-raw-measured/instructions.txt
+budgets:
+  development_usd: 100
+  researcher_usd: 100
+  evaluation_usd: 120
+  suite_usd: 30
+  item_usd: 30
+design:
+  rounds: 1
+  seconds: 10800
+  checkpoint_seconds: 10800
+  minimum_items: 100
+  final_development_measurement: false
+  continuation:
+    reprompt_remaining_seconds: 5400
+    transport_retries: 2
+evaluation:
+  seconds: 36000
+  model_concurrency: 2
+  requests_per_model: 2
+  preflight: true
+  policy:
+    min_output_tokens: 1
+    default_output_tokens: 8192
+    max_output_tokens: 131072
+domain_protocol:
+  version: 3
+  domains:
+  - coding
+  - co-work
+  - reasoning
+  minimum_models: 3
+  minimum_families: 2
+  allow_pending_references: true
+  score_mode: raw_domain
+overall:
+  metric: macro_spearman
+  source: raw_domain
+  minimum_models: 3
+  constant_prediction: zero
+benchmarks:
+  whitebox:
+  - id: terminalbench-2.1
+    domain: coding
+    scale: 1
+    reference: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/references/terminalbench-2.1.json
+    resources:
+    - /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/joint-campaign-20260913/research-resources-08/bundle/targets/terminalbench-2.1
+    - /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/materials/trajectories
+    holdout_panel:
+    - holdout-01
+    - holdout-02
+    - holdout-07
+    - holdout-11
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Small exploratory mixed-provider panel; missing published
+      reference stays pending, no invented labels.
+  - id: deepswe-1.1
+    domain: coding
+    scale: 1
+    reference: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/references/deepswe-1.1.json
+    resources:
+    - /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/joint-campaign-20260913/research-resources-08/bundle/targets/deepswe-1.1
+    holdout_panel:
+    - holdout-01
+    - holdout-02
+    - holdout-07
+    - holdout-11
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Small exploratory mixed-provider panel; missing published
+      reference stays pending, no invented labels.
+  - id: gdpval-aa-v2
+    domain: co-work
+    scale: 1000
+    reference: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/references/gdpval-aa-v2.json
+    resources:
+    - /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/joint-campaign-20260913/research-resources-08/bundle/targets/gdpval-aa-v2
+    holdout_panel:
+    - holdout-01
+    - holdout-02
+    - holdout-07
+    - holdout-11
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Small exploratory mixed-provider panel; missing published
+      reference stays pending, no invented labels.
+  - id: arxivmath-202606
+    domain: reasoning
+    scale: 1
+    reference: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/references/arxivmath-202606.json
+    resources:
+    - /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/joint-campaign-20260913/research-resources-08/bundle/targets/arxivmath-202606
+    holdout_panel:
+    - holdout-01
+    - holdout-02
+    - holdout-07
+    - holdout-11
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Small exploratory mixed-provider panel; missing published
+      reference stays pending, no invented labels.
+  - id: hle-text
+    domain: reasoning
+    scale: 1
+    reference: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/references/hle-text.json
+    resources:
+    - /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/joint-campaign-20260913/research-resources-08/bundle/targets/hle-text
+    holdout_panel:
+    - holdout-01
+    - holdout-02
+    - holdout-07
+    - holdout-11
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Small exploratory mixed-provider panel; missing published
+      reference stays pending, no invented labels.
+  blackbox:
+  - id: swebench-pro-public
+    domain: coding
+    scale: 1
+    reference: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/references/swebench-pro-public.json
+    resources: []
+    holdout_panel:
+    - holdout-01
+    - holdout-02
+    - holdout-07
+    - holdout-11
+    reference_status: pending_heldout_reference
+    reference_pending_reason: Small exploratory mixed-provider panel; missing published
+      reference stays pending, no invented labels.
+  - id: livecodebench-pro
+    domain: coding
+    scale: 1
+    reference: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/references/livecodebench-pro.json
+    resources: []
+    holdout_panel:
+    - holdout-01
+    - holdout-02
+    - holdout-07
+    - holdout-11
+    reference_status: pending_heldout_reference
+    reference_pending_reason: Small exploratory mixed-provider panel; missing published
+      reference stays pending, no invented labels.
+  - id: apex-agents
+    domain: co-work
+    scale: 1
+    reference: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/references/apex-agents.json
+    resources: []
+    holdout_panel:
+    - holdout-01
+    - holdout-02
+    - holdout-07
+    - holdout-11
+    reference_status: pending_heldout_reference
+    reference_pending_reason: Small exploratory mixed-provider panel; missing published
+      reference stays pending, no invented labels.
+  - id: ale
+    domain: co-work
+    scale: 1
+    reference: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/references/ale.json
+    resources: []
+    holdout_panel:
+    - holdout-01
+    - holdout-02
+    - holdout-07
+    - holdout-11
+    reference_status: pending_heldout_reference
+    reference_pending_reason: Small exploratory mixed-provider panel; missing published
+      reference stays pending, no invented labels.
+  - id: frontiermath-tiers123
+    domain: reasoning
+    scale: 1
+    reference: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/references/frontiermath-tiers123.json
+    resources: []
+    holdout_panel:
+    - holdout-01
+    - holdout-02
+    - holdout-07
+    - holdout-11
+    reference_status: pending_heldout_reference
+    reference_pending_reason: Small exploratory mixed-provider panel; missing published
+      reference stays pending, no invented labels.
+  - id: browsecomp
+    domain: reasoning
+    scale: 1
+    reference: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/openai-mixed-20260915/references/browsecomp.json
+    resources: []
+    holdout_panel:
+    - holdout-01
+    - holdout-02
+    - holdout-07
+    - holdout-11
+    reference_status: pending_heldout_reference
+    reference_pending_reason: Small exploratory mixed-provider panel; missing published
+      reference stays pending, no invented labels.
+auxiliary_models:
+- model: gpt-5.5-2026-04-23
+  provider: openai
+  price:
+    input: 5
+    output: 30
+    cache_read_multiplier: 0.1
+    cache_write_multiplier: 1
+    long_context:
+      threshold_tokens: 272000
+      input_multiplier: 2
+      output_multiplier: 1.5
+  effort: xhigh
+  native_limits:
+    max_context_tokens: 1050000
+    max_output_tokens: 128000
+  id: helper-grader
+  roles:
+  - grader
+- model: deepseek-v4-flash-0731
+  price:
+    cache_read_multiplier: 0.25
+    input: 0.06
+    output: 0.18
+  provider: vectorengine
+  effort: max
+  native_limits:
+    max_context_tokens: 1048576
+    max_output_tokens: 131072
+  id: helper-simulator
+  roles:
+  - simulator
+  - grader
