@@ -181,6 +181,9 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
         except (ValueError, KeyError, TypeError, AttributeError) as error:
             return JSONResponse({'error':str(error)},400)
         upstream_path='/responses' if native_responses else '/chat/completions'
+    guard=root/'model-guards'/hashlib.sha256(body['model'].encode()).hexdigest()
+    if config.get('isolate_model_overruns') and guard.exists():
+        return JSONResponse({'error':{'type':'model_accounting_guard','message':'This model requires accounting reconciliation'}},422)
     operation_id = request.headers.get('x-seb-operation-id', uuid.uuid4().hex)
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', operation_id):
         return JSONResponse({'error': 'Invalid operation ID'}, 400)
@@ -267,6 +270,13 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
                     status, streaming=record['http_status'],record['streaming']
                     (folder/'response.body').write_bytes(raw)
                 else:
+                    cooldown=root/'cooldowns'/hashlib.sha256(body['model'].encode()).hexdigest()
+                    if config.get('rate_limit_cooldown_seconds'):
+                        while cooldown.exists():
+                            until=float(cooldown.read_text())
+                            wait=min(until-time.time(),entry.get('deadline_epoch',float('inf'))-time.time())
+                            if wait<=0:break
+                            await asyncio.sleep(min(wait,5))
                     if time.time()>=entry.get('deadline_epoch',float('inf')):
                         raise CacheError('Execution deadline reached before issuing provider request')
                     provider_started=True
@@ -336,7 +346,20 @@ async def metered_request(request, body, raw_request, config, entry, ledger, *, 
                     state = 'cache_error' if isinstance(error,CacheError) else 'internal_error'
             if charge is not None and charge > amount + 1e-9:
                 state, retry = 'reservation_bound_exceeded', False
-                with ledger.connect() as db: db.execute('UPDATE wallets SET cap=0 WHERE name=?', (entry['wallet'],))
+                if config.get('isolate_model_overruns'):
+                    guard=root/'model-guards'/hashlib.sha256(body['model'].encode()).hexdigest()
+                    guard.parent.mkdir(exist_ok=True)
+                    guard.write_text(json.dumps({'model':body['model'],'wallet':entry['wallet'],
+                        'call_id':call_id,'reserve':amount,'charged':charge,'at':time.time()}))
+                else:
+                    with ledger.connect() as db: db.execute('UPDATE wallets SET cap=0 WHERE name=?', (entry['wallet'],))
+            if status==429 and config.get('rate_limit_cooldown_seconds'):
+                cooldown=root/'cooldowns'/hashlib.sha256(body['model'].encode()).hexdigest()
+                cooldown.parent.mkdir(exist_ok=True)
+                delay=float(config['rate_limit_cooldown_seconds'])*2**min(index,3)
+                try:delay=max(delay,float(response_headers.get('retry-after',0)))
+                except ValueError:pass
+                cooldown.write_text(str(time.time()+delay))
             ledger_state = 'completed' if state == 'completed' and terminal else state
             if cached and ledger_state=='completed':
                 ledger.finish_cached(call_id,charge,usage,record)

@@ -218,3 +218,31 @@ def test_frozen_parameters_and_protocol_change_cannot_reuse_old_result(provider)
     config['model_backends']['c01']['model']='different-checkpoint'
     with TestClient(create_app(config)) as client:assert post(client).status_code==409
     assert len(server.bodies)==1
+
+
+def test_model_overrun_does_not_close_sibling_wallet(provider):
+    server,config=provider
+    config['isolate_model_overruns']=True
+    config['prices']['c02']=config['prices']['c01']
+    config['model_backends']['c02']={'model':'sibling'}
+    config['tokens']['token']['models'].append('c02')
+    body=json.loads(answer()[1]);body['usage']['output_tokens']=100000
+    server.responses=[(200,json.dumps(body).encode(),{'Content-Type':'application/json'}),answer()]
+    app=create_app(config)
+    with TestClient(app) as client:
+        assert post(client).status_code==422
+        assert app.state.ledger.status('test')[0]['cap']==10
+        response=client.post('/anthropic/v1/messages',json={'model':'c02','max_tokens':32768,'messages':[{'role':'user','content':'ok'}]},headers={'x-api-key':'token'})
+        assert response.status_code==200
+        assert post(client).json()['error']['type']=='model_accounting_guard'
+    assert len(server.bodies)==2
+
+
+def test_rate_limit_cooldown_is_persisted_and_unknown_charge_kept(provider):
+    from pathlib import Path
+    server,config=provider;config['rate_limit_cooldown_seconds']=0.01
+    server.responses=[(429,b'{"error":{"type":"rate_limit_error"}}',{}),answer()]
+    app=create_app(config)
+    with TestClient(app) as client:assert post(client).status_code==200
+    assert len(list((Path(config['artifacts'])/'cooldowns').iterdir()))==1
+    assert app.state.ledger.status('test')[0]['outstanding']>0
