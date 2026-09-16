@@ -209,6 +209,25 @@ def test_offline_cache_recovery_rejects_nonempty_response(provider):
     assert len(received)==1
 
 
+def test_offline_cache_recovery_preserves_completed_text_without_resampling(provider):
+    from seb.translation_recovery import recover_terminal_cache_response
+    server,received,cfg=provider
+    value=answer('Original answer, kept exactly.')
+    value['usage']={'prompt_tokens':180,'completion_tokens':292,'total_tokens':531,
+        'prompt_tokens_details':{'cached_tokens':239}}
+    server.respond=lambda _:value
+    with TestClient(create_app(cfg)) as client:
+        failed=post(client);assert failed.status_code==422
+        ident=failed.headers['x-seb-request-id']
+        assert recover_terminal_cache_response(cfg['artifacts'],ident)['status']=='recovered'
+        replay=post(client)
+        assert replay.status_code==200
+        assert replay.json()['content']==[{'type':'text','text':'Original answer, kept exactly.'}]
+        assert replay.json()['stop_reason']=='end_turn'
+        assert replay.headers['x-seb-request-id']==ident
+    assert len(received)==1
+
+
 def test_chat_provider_config_survives_gateway_build(tmp_path,monkeypatch):
     import yaml
     from test_experiment import fixture_config
