@@ -141,13 +141,20 @@ class CandidateAdapter:
         if output is None:raise ValueError('Missing or ambiguous native token usage')
         details=usage.get('prompt_tokens_details') or {}
         cached=details.get('cached_tokens') or 0;written=details.get('cache_write_tokens') or 0
-        if any(type(n) is not int or n<0 for n in (cached,written)) or cached+written>usage['prompt_tokens']:
+        invalid_cache=any(type(n) is not int or n<0 for n in (cached,written)) or cached+written>usage['prompt_tokens']
+        if invalid_cache and not self.backend.get('allow_unreconciled_usage'):
             raise ValueError('Inconsistent native input usage')
         message={'id':response['id'],'type':'message','role':'assistant','model':self.alias,
                  'content':content,'stop_reason':'max_tokens' if stop=='length' else
                     'tool_use' if any(b['type']=='tool_use' for b in content) else 'end_turn',
                  'stop_sequence':None,'usage':{'input_tokens':usage['prompt_tokens']-cached-written,
                     'cache_read_input_tokens':cached,'cache_creation_input_tokens':written,'output_tokens':output}}
+        if invalid_cache:
+            # Answer delivery does not require inventing a valid cache breakdown.
+            # Metering uses the untouched upstream usage, not this envelope.
+            message['usage']={'input_tokens':usage['prompt_tokens'],'output_tokens':output}
+            message['usage_status']='unreconciled'
+            message['native_usage']=copy.deepcopy(usage)
         record={'content':content,'native_message':native,'opaque_tokens_bound':usage['prompt_tokens']+output}
         paths=[self.path(b['id']) for b in content if b['type']=='tool_use']
         for path in paths:

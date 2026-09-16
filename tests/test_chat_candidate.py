@@ -132,6 +132,83 @@ def test_bad_tool_arguments_and_ambiguous_usage_are_not_retried(provider):
     assert len(received)==2 and Ledger(Path(cfg['artifacts'])/'ledger.sqlite').status()[0]['outstanding']>0
 
 
+def test_unreconciled_cache_preserves_terminal_empty_answer_and_reservation(provider):
+    server,received,cfg=provider
+    cfg['model_backends']['c01']['allow_unreconciled_usage']=True
+    value=answer('')
+    value['choices'][0]['finish_reason']='length'
+    value['usage']={'prompt_tokens':225,'completion_tokens':2500,'total_tokens':2784,
+        'prompt_tokens_details':{'cached_tokens':256},
+        'completion_tokens_details':{'reasoning_tokens':0}}
+    server.respond=lambda _:value
+    with TestClient(create_app(cfg)) as client:
+        response=post(client)
+        assert response.status_code==200
+        data=response.json()
+        assert data['content']==[] and data['stop_reason']=='max_tokens'
+        assert data['usage_status']=='unreconciled'
+        assert data['native_usage']==value['usage']
+        assert 'cache_read_input_tokens' not in data['usage']
+        replay=post(client)
+        assert replay.json()==data and replay.headers['x-seb-replayed']=='true'
+    assert len(received)==1
+    ledger=Ledger(Path(cfg['artifacts'])/'ledger.sqlite')
+    with ledger.connect() as db:
+        row=db.execute('SELECT * FROM calls').fetchone()
+        assert row['state']=='completed' and row['charged'] is None
+        assert json.loads(row['usage'])==value['usage']
+    assert ledger.status()[0]['outstanding']>0
+
+
+def test_invalid_cache_still_rejected_without_explicit_opt_in(provider):
+    server,received,cfg=provider
+    value=answer();value['usage']['prompt_tokens_details']={'cached_tokens':256}
+    server.respond=lambda _:value
+    with TestClient(create_app(cfg)) as client:
+        assert post(client).status_code==422
+    assert len(received)==1
+
+
+def test_offline_empty_cache_recovery_keeps_original_usage_and_no_new_call(provider):
+    from seb.translation_recovery import recover_empty_cache_response
+    server,received,cfg=provider
+    value=answer('');value['choices'][0]['finish_reason']='length'
+    value['usage']={'prompt_tokens':225,'completion_tokens':2500,'total_tokens':2784,
+        'prompt_tokens_details':{'cached_tokens':256}}
+    server.respond=lambda _:value
+    root=Path(cfg['artifacts'])
+    with TestClient(create_app(cfg)) as client:
+        failed=post(client);assert failed.status_code==422
+        ident=failed.headers['x-seb-request-id']
+        original={p.name:p.read_bytes() for p in (root/'wire'/ident).iterdir()}
+        ledger=Ledger(root/'ledger.sqlite')
+        with ledger.connect() as db:before=dict(db.execute('SELECT * FROM calls WHERE id=?',(ident,)).fetchone())
+        assert recover_empty_cache_response(root,ident)['status']=='recovered'
+        assert recover_empty_cache_response(root,ident)['status']=='already_recovered'
+        replay=post(client)
+        assert replay.status_code==200 and replay.json()['content']==[]
+        assert replay.json()['stop_reason']=='max_tokens'
+        assert replay.headers['x-seb-request-id']==ident
+        with ledger.connect() as db:after=dict(db.execute('SELECT * FROM calls WHERE id=?',(ident,)).fetchone())
+        assert after==before|{'state':'completed'}
+        assert original=={p.name:p.read_bytes() for p in (root/'wire'/ident).iterdir()}
+    assert len(received)==1
+
+
+def test_offline_cache_recovery_rejects_nonempty_response(provider):
+    from seb.translation_recovery import recover_empty_cache_response
+    server,received,cfg=provider
+    value=answer('REAL ANSWER');value['choices'][0]['finish_reason']='length'
+    value['usage']={'prompt_tokens':225,'completion_tokens':2500,'total_tokens':2784,
+        'prompt_tokens_details':{'cached_tokens':256}}
+    server.respond=lambda _:value
+    with TestClient(create_app(cfg)) as client:
+        failed=post(client)
+        with pytest.raises(ValueError,match='Only empty'):
+            recover_empty_cache_response(cfg['artifacts'],failed.headers['x-seb-request-id'])
+    assert len(received)==1
+
+
 def test_chat_provider_config_survives_gateway_build(tmp_path,monkeypatch):
     import yaml
     from test_experiment import fixture_config
