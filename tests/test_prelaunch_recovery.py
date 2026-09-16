@@ -8,6 +8,56 @@ from seb.ledger import Ledger
 from seb.prelaunch_recovery import archive_unstarted,restore_ledger
 
 
+def partial_preflight(tmp_path):
+    import hashlib
+    output,cfg,ledger,started=failed(tmp_path)
+    cfg['models']=[{'id':'a'},{'id':'b'}]
+    state=json.loads((output/'state.json').read_text())
+    state['error']='RuntimeError: Model transport preflight incomplete; no researcher launched'
+    (output/'state.json').write_text(json.dumps(state))
+    (output/'preflight-jobs').mkdir()
+    for model in ('a','b'):
+        ledger.reserve(model,'development',model,1)
+        ledger.finish(model,.2,{},'completed')
+        wire=output/'gateway/wire'/model;wire.mkdir(parents=True)
+        raw=b'{"choices": [{"message": {"content": "4"}}]}'
+        (wire/'response.body').write_bytes(raw)
+        (wire/'meta.json').write_text(json.dumps({'http_status':200,'model':model,'response_sha256':hashlib.sha256(raw).hexdigest()}))
+        (output/'preflight-jobs'/f'{model}.job.json').write_text(json.dumps({'id':model}))
+        job=output/'research-jobs'/model;job.mkdir(parents=True)
+        (job/'request.json').write_text('{}')
+        (job/'result.json').write_text(json.dumps({'status':'incomplete'}))
+    ledger.reserve('unknown','development','b',.5)
+    ledger.finish('unknown',None,{},'infra_error')
+    return output,cfg,ledger,started
+
+
+def test_partial_transport_continuation_retains_unknowns_and_original_clock(tmp_path):
+    from seb.prelaunch_recovery import archive_verified_preflight
+    output,cfg,ledger,started=partial_preflight(tmp_path)
+    before=ledger.status()
+    recovery=archive_verified_preflight(output,cfg,'r',allow_partial_transport=True)
+    assert recovery['original_deadline_epoch']==started+3600
+    assert recovery['transport_verified_models']==['a','b']
+    restore_ledger(recovery,output)
+    assert Ledger(output/'gateway/ledger.sqlite').status()==before
+    assert (Path(recovery['archive'])/'gateway/wire/b/response.body').exists()
+
+
+@pytest.mark.parametrize('mutation',['missing_success','corrupt','live_call','live_job','research_started','config_changed'])
+def test_partial_transport_continuation_requires_evidence_and_stopped_jobs(tmp_path,mutation):
+    from seb.prelaunch_recovery import archive_verified_preflight
+    output,cfg,ledger,_=partial_preflight(tmp_path)
+    if mutation=='missing_success':ledger.finish('b',None,{},'infra_error')
+    elif mutation=='corrupt':(output/'gateway/wire/b/response.body').write_text('corrupt')
+    elif mutation=='live_call':ledger.reserve('inflight','development','b',1)
+    elif mutation=='live_job':(output/'research-jobs/b/result.json').write_text('{"status":"running"}')
+    elif mutation=='research_started':(output/'researcher-work').mkdir()
+    else:cfg['_config_sha256']='changed'
+    with pytest.raises(ValueError):archive_verified_preflight(output,cfg,'r',allow_partial_transport=True)
+    assert output.exists()
+
+
 def failed(tmp_path):
     output=tmp_path/'run';output.mkdir()
     started=time.time()-30

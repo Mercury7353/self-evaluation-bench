@@ -54,7 +54,7 @@ def restore_ledger(recovery, output):
         with sqlite3.connect(destination) as target:source.backup(target)
 
 
-def archive_verified_preflight(output, cfg, researcher_id):
+def archive_verified_preflight(output, cfg, researcher_id, *, allow_partial_transport=False):
     """Continue a failed transport-only preflight after validating saved responses.
 
     No response is regenerated or rescored and no uncertain charge is released.
@@ -74,9 +74,19 @@ def archive_verified_preflight(output, cfg, researcher_id):
     with sqlite3.connect(ledger.resolve().as_uri()+'?mode=ro',uri=True) as db:
         rows=db.execute('SELECT id,wallet,model,state FROM calls').fetchall()
         if not rows or any(wallet!='development' for _,wallet,_,_ in rows):raise ValueError('Only preflight calls allowed')
-        candidates={m['id'] for m in cfg['models']}
+        candidates={m['id'] for m in cfg['models'] if m.get('availability')!='pending'}
         if {m for _,_,m,_ in rows}!=candidates:raise ValueError('Incomplete candidate preflight coverage')
+        observed=set()
         for ident,_,model,status in rows:
+            if allow_partial_transport:
+                if status=='reserved':raise ValueError('Preflight request remains in flight')
+                if status!='completed':continue
+                folder=output/'gateway/wire'/ident
+                meta=json.loads((folder/'meta.json').read_text());raw=(folder/'response.body').read_bytes()
+                if meta.get('http_status')!=200 or meta.get('response_sha256')!=hashlib.sha256(raw).hexdigest() or meta.get('model')!=model:
+                    raise ValueError('Invalid completed transport evidence')
+                observed.add(model)
+                continue
             if status=='completed':continue
             if status!='response_translation_error':raise ValueError('Unresolved nontranslation failure')
             folder=output/'gateway/wire'/ident;meta=json.loads((folder/'meta.json').read_text());raw=(folder/'response.body').read_bytes()
@@ -87,6 +97,16 @@ def archive_verified_preflight(output, cfg, researcher_id):
             with tempfile.TemporaryDirectory() as temp:
                 adapter=CandidateAdapter(temp,{'model':response.get('model'),'effort':'max','allow_unreconciled_usage':True},model,'offline')
                 adapter.translate(response,False)
+        if allow_partial_transport and observed!=candidates:
+            raise ValueError('Every candidate needs a verified completed response')
+        if allow_partial_transport:
+            jobs=output/'preflight-jobs'
+            allowed={json.loads(p.read_text())['id'] for p in jobs.glob('*.job.json')}
+            actual={p.parent.name for p in (output/'research-jobs').glob('*/request.json')}
+            if not allowed or actual!=allowed:raise ValueError('Unexpected non-preflight jobs')
+            for ident in allowed:
+                job=json.loads((output/'research-jobs'/ident/'result.json').read_text())
+                if job.get('status') in ('running','queued'):raise ValueError('Preflight job remains live')
         wallets=dict(db.execute('SELECT name,cap FROM wallets').fetchall())
         for name,key in [('designer','researcher_usd'),('development','development_usd'),('evaluation','evaluation_usd')]:
             if wallets.get(name)!=cfg['budgets'][key]:raise ValueError('Wallet cap changed')
@@ -95,4 +115,6 @@ def archive_verified_preflight(output, cfg, researcher_id):
     parent.mkdir(parents=True);archive=parent/'attempt-1';output.rename(archive)
     return {'archive':str(archive),'original_started':state['started'],'original_deadline_epoch':deadline,
             'prior_model_calls':len(rows),'preflight_offline_verified':True,'recovered_at':time.time(),
-            'reason':'Saved HTTP200 responses verified offline; raw results, usage, ledger rows and unknown reservations preserved; no repeated calls'}
+            'partial_transport_verified':allow_partial_transport,
+            'transport_verified_models':sorted(observed) if allow_partial_transport else [],
+            'reason':('At least one hash-verified completed HTTP200 response per candidate; partial preflight is not full suite acceptance. ' if allow_partial_transport else '')+'Saved HTTP200 responses verified offline; raw results, usage, ledger rows and unknown reservations preserved; no repeated calls'}
