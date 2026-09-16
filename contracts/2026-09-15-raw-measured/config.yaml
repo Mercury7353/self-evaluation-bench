@@ -219,7 +219,7 @@ domain_protocol:
   allow_pending_references: true
   score_mode: raw_domain
 overall:
-  metric: macro_spearman
+  metric: macro_pearson
   source: raw_domain
   minimum_models: 3
   constant_prediction: zero

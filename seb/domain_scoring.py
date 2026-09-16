@@ -19,7 +19,8 @@ def finite(value):
     return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
 
 
-def component(predictions, references, expected, families, *, minimum_models, minimum_families, panel=None, pending_models=None):
+def component(predictions, references, expected, families, *, minimum_models, minimum_families, panel=None, pending_models=None, metric="spearman"):
+    if metric not in ('pearson','spearman'):raise ValueError('Unknown correlation metric')
     ids = [m for m in expected if m in references] if panel is None else list(panel)
     if len(ids)!=len(set(ids)) or any(m not in expected for m in ids):
         raise ValueError('Reference panel must contain unique expected held-out models')
@@ -44,18 +45,19 @@ def component(predictions, references, expected, families, *, minimum_models, mi
         if len(pending)==len(absent):
             return base | {'status':'PENDING_PROVIDER','utility':None,'spearman':None,
                            'pending_provider_models':{m:pending_models[m] for m in pending}}
-        return base | {'status': 'FAIL', 'utility': -1., 'spearman': None,
+        return base | {'status': 'FAIL', 'utility': None if metric=='pearson' else -1., 'spearman': None,
                        'missing_models': [m for m in absent if m not in pending],
                        'pending_provider_models':{m:pending_models[m] for m in pending}}
     x = [predictions[m] for m in ids]
     if len(set(x)) < 2:
         return base | {'status': 'CONST', 'utility': 0., 'spearman': None, 'pearson': None}
     rho = corr(ranks(x), ranks(y))
-    return base | {'status': 'OK', 'utility': rho, 'spearman': rho, 'pearson': corr(x, y)}
+    pearson=corr(x,y)
+    return base | {'status': 'OK', 'utility': pearson if metric=='pearson' else rho, 'spearman': rho, 'pearson': pearson}
 
 
 def summarize_outputs(models, references, visible_ids, sealed_ids, predictions, domain_scores,
-                      *, minimum_models=8, minimum_families=4, reference_panels=None):
+                      *, minimum_models=8, minimum_families=4, reference_panels=None, metric="spearman"):
     held = [m for m in models if m['split'] == 'holdout']
     ids = [m['id'] for m in held]
     families = {m['id']: m['family'] for m in held}
@@ -69,18 +71,18 @@ def summarize_outputs(models, references, visible_ids, sealed_ids, predictions, 
                       if visibility == 'visible' else domain_scores)
             report[visibility][target] = component(values, references.get(target, {}), ids, families,
                 minimum_models=minimum_models, minimum_families=minimum_families,
-                panel=reference_panels[target] if reference_panels is not None else None,pending_models=pending_models)
+                panel=reference_panels[target] if reference_panels is not None else None,pending_models=pending_models,metric=metric)
         components = [r['utility'] for r in report[visibility].values()]
         report[visibility + '_utility'] = statistics.mean(components) if components and all(x is not None for x in components) else None
     return report
 
 
 def summarize_joint(models, references, domains, predictions, domain_scores,
-                    *, minimum_models=8, minimum_families=4, reference_panels=None):
+                    *, minimum_models=8, minimum_families=4, reference_panels=None, metric="spearman"):
     """Score the same measurements by target, then weight each domain equally."""
     reports={domain:summarize_outputs(models,references,targets['visible'],targets['sealed'],
         predictions,domain_scores.get(domain,{}),minimum_models=minimum_models,minimum_families=minimum_families,
-        reference_panels=reference_panels)
+        reference_panels=reference_panels,metric=metric)
         for domain,targets in domains.items()}
     result={'domains':reports,'acceptance_models':[m['id'] for m in models if m['split']=='holdout'],
             'fit_uses_sealed_labels':False,'research_unit':'joint'}
@@ -93,7 +95,8 @@ def summarize_joint(models, references, domains, predictions, domain_scores,
 
 def score_domain(config, source, development_results, acceptance_results, models, references,
                  visible_targets, sealed_targets, output, *, minimum_models=8, minimum_families=4,
-                 domains=None, reference_panels=None):
+                 domains=None, reference_panels=None, metric="spearman"):
+    metric='pearson' if config.get('score_mode')=='raw_domain' else metric
     output = Path(output); output.mkdir(parents=True, exist_ok=True)
     source = Path(source)
     tasks = [i['id'] for i in json.loads((source/'evaluation.json').read_text())['items']]
@@ -135,13 +138,13 @@ def score_domain(config, source, development_results, acceptance_results, models
         domain_scores = {m['id']: by_test[m['id']]['result'].get('score') for m in held
                          if by_test.get(m['id'], {}).get('score_status') == 'valid'}
         report = summarize_outputs(models, references, visible_targets, sealed_targets, predictions, domain_scores,
-            minimum_models=minimum_models, minimum_families=minimum_families,reference_panels=reference_panels)
+            minimum_models=minimum_models, minimum_families=minimum_families,reference_panels=reference_panels,metric=metric)
     else:
         domain_scores={d:{m['id']:by_test[m['id']]['result']['domain_scores'][d] for m in held
             if by_test.get(m['id'],{}).get('result',{}).get('domain_score_status',{}).get(d)=='valid'} for d in domains}
         if config.get('score_mode')=='raw_domain':domain_scores=measured
         report=summarize_joint(models,references,domains,predictions,domain_scores,
-            minimum_models=minimum_models,minimum_families=minimum_families,reference_panels=reference_panels)
+            minimum_models=minimum_models,minimum_families=minimum_families,reference_panels=reference_panels,metric=metric)
     # Trusted scoring input, never mounted into researcher/predictor execution.
     # Preserve predictions so adding reference labels never needs another fit or model call.
     write(output/'reference-scoring-input.json',{'version':1,'models':models,'references':references,
@@ -152,7 +155,7 @@ def score_domain(config, source, development_results, acceptance_results, models
         'predictions':predictions,'domain_scores':domain_scores,
         'minimum_models':minimum_models,'minimum_families':minimum_families,
         'submission_sha256':digest_tree(source)})
-    report.update(score_mode=config.get('score_mode','predicted_target'), predictions=predictions, domain_scores=domain_scores,
+    report.update(metric=metric,score_mode=config.get('score_mode','predicted_target'), predictions=predictions, domain_scores=domain_scores,
                   predictor_error=error, development_models=len(train),
                   complete_models=len(test), expected_models=len(held))
     if config.get('score_mode')=='raw_domain':

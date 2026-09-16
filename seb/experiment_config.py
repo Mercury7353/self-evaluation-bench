@@ -175,8 +175,11 @@ def load(path, *, resolve_inputs=True):
     if 'judge_usd' in budgets:positive(budgets['judge_usd'],'budgets.judge_usd')
     evaluation['policy']=DEFAULT_POLICY | evaluation.get('policy',{});policy_for({'evaluation_policy':evaluation['policy']})
     overall=cfg.setdefault('overall',{});overall.setdefault('metric','macro_spearman');overall.setdefault('source','family_cv');overall.setdefault('minimum_models',3);overall.setdefault('constant_prediction','zero')
-    if overall['metric']!='macro_spearman' or overall['source'] not in ['family_cv','raw_mean','raw_domain']:raise ValueError('overall uses macro_spearman with source family_cv, raw_mean or raw_domain')
-    if cfg.get('domain_protocol',{}).get('score_mode')=='raw_domain':overall['source']='raw_domain'
+    if overall['metric'] not in ('macro_spearman','macro_pearson') or overall['source'] not in ['family_cv','raw_mean','raw_domain']:raise ValueError('overall uses macro_spearman/macro_pearson with source family_cv, raw_mean or raw_domain')
+    if cfg.get('domain_protocol',{}).get('score_mode')=='raw_domain':
+        overall['source']='raw_domain'
+        if overall['metric']!='macro_pearson':raise ValueError('raw_domain requires macro_pearson objective')
+    elif overall['metric']=='macro_pearson':raise ValueError('macro_pearson requires raw_domain mode')
     elif overall['source']=='raw_domain':raise ValueError('raw_domain source requires raw_domain protocol mode')
     if type(overall['minimum_models']) is not int or overall['minimum_models']<3:raise ValueError('overall.minimum_models must be at least 3')
     if overall['constant_prediction'] not in ['zero','undefined']:raise ValueError('constant_prediction must be zero or undefined')

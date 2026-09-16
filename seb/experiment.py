@@ -594,7 +594,7 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
 
 RAW_DOMAIN_TASK = """Design and iteratively improve one low-cost executable benchmark across coding, co-work and reasoning.
 Return independently scored items and three frozen measured domain scores. Do not submit a target-score predictor.
-Use development measurements and feedback to evaluate score discrimination and agreement with reference benchmark rankings.
+Optimize Pearson correlation between directly measured domain scores and visible reference benchmark scores across development models; average targets within domain, then average the three domains equally. Use feedback to iterate. Spearman and score discrimination are auxiliary diagnostics.
 CONTRACT.md specifies measurement and feedback interfaces. Research strategy and task construction are your choice.
 """
 RAW_DOMAIN_CONTRACT = """
@@ -603,7 +603,7 @@ Required outputs: run.py, evaluation.json, question/grader assets, and README.md
 Declare exactly the three domain_aggregations in whitebox.json, with frozen scoring rules and weights.
 A domain score comes directly from observed item grades. Reuse it for every reference benchmark in that domain.
 No predictor.py, fitted target-score conversion, reference-scale calibration, or post-hoc clipping is requested or executed.
-Iteration objective: improve the Spearman rank correlation between directly measured domain scores and visible reference scores across development models. Average target correlations within each domain, then weight the three domains equally. Pearson, score gaps and tied-pair counts are diagnostics. A constant measured score has undefined correlation and zero ranking utility; missing infrastructure coverage stays explicit. A high average task score is not rewarded by itself.
+Iteration objective: improve the Pearson correlation between directly measured domain scores and visible reference scores across development models. Average target correlations within each domain, then weight the three domains equally. Spearman, score gaps and tied-pair counts are diagnostics. A constant measured score has undefined correlation and zero ranking utility; missing infrastructure coverage stays explicit. A high average task score is not rewarded by itself.
 Development feedback reports the measured domain scores, unique-score counts, Pearson and Spearman against visible references.
 Use {"kind":"weighted_mean","weights":{"item_id":1.0}} for each domain_aggregations entry, or a frozen custom rule with declared item IDs and a method description; return custom results under domain_scores. Grade rules must depend on candidate responses, not candidate identity or target reference labels.
 Reference labels inform development only; acceptance scores use the same frozen item grading and aggregation for all models.

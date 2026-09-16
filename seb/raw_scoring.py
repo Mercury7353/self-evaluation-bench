@@ -25,7 +25,7 @@ def score_raw_panel(source, results, models, references, targets, output, *, min
     for target,metadata in targets.items():
         domain=metadata['domain'];values=scores.get(domain,{})
         row=component(values,references.get(target,{}),ids,families,
-            minimum_models=minimum_models,minimum_families=1)
+            minimum_models=minimum_models,minimum_families=1,metric="pearson")
         row.update(domain=domain,score_source='measured_domain',distinct_scores=len(set(values.values())))
         available=[m for m in ids if m in values and m in references.get(target,{})]
         pairs={'concordant':0,'discordant':0,'measured_tie':0,'reference_tie':0}
@@ -40,6 +40,6 @@ def score_raw_panel(source, results, models, references, targets, output, *, min
     utilities=list(domain_utilities.values())
     report={'measured_domain_scores':scores,'targets':rows,'domain_utilities':domain_utilities,
             'models':len(ids),'complete_models':sum(all(m in v for v in scores.values()) for m in ids) if scores else 0,
-            'overall':{'metric':'domain_macro_spearman','source':'raw_domain','score':statistics.mean(utilities) if utilities and all(v is not None for v in utilities) else None},
+            'overall':{'metric':'domain_macro_pearson','source':'raw_domain','score':statistics.mean(utilities) if utilities and all(v is not None for v in utilities) else None},
             'note':'Direct frozen measured scores; no target-label fitting, prediction, calibration or clipping. Constant measured scores have zero ranking utility; correlation itself is undefined.'}
     write(Path(output)/'scores.json',report);return report
