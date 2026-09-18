@@ -23,12 +23,18 @@ def main(root):
     root=Path(root);cfg=json.loads((root/'run-config.json').read_text())
     assert hashlib.sha256((root/'suite.json').read_bytes()).hexdigest()==cfg['suite_sha256']
     lock=open(root/'run.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-    sys.path.insert(0,str(root/'vendor'));os.environ['NLTK_DATA']=cfg['nltk_data']
+    sys.path.insert(0,cfg.get('vendor_path',str(root/'vendor')));os.environ['NLTK_DATA']=cfg['nltk_data']
     suite=json.loads((root/'suite.json').read_text())
-    pilot=[x for d in ['coding','co-work','reasoning'] for x in [a for a in suite if a['domain']==d][:2]]
+    pilot=([next(x for x in suite if x['source']==source) for source in dict.fromkeys(x['source'] for x in suite)] if cfg.get('pilot_each_source') else [x for d in ['coding','co-work','reasoning'] for x in [a for a in suite if a['domain']==d][:2]])
     pilot_ids={x['id'] for x in pilot};suite=pilot+[x for x in suite if x['id'] not in pilot_ids]
-    ledger=Ledger(root/'ledger.sqlite');ledger.wallet('random',cfg['budget_usd'])
+    ledger=Ledger(cfg.get('ledger_path',root/'ledger.sqlite'));ledger.wallet('random',cfg['budget_usd'])
     started=time.time();models=cfg['models'];results=root/'results';results.mkdir(exist_ok=True)
+    reusable={}
+    for source in cfg.get('reuse_roots',[]):
+        source=Path(source);oldcfg=json.loads((source/'run-config.json').read_text())
+        for old in json.loads((source/'suite.json').read_text()):
+            reusable[hashlib.sha256(json.dumps(old,sort_keys=True).encode()).hexdigest()]=(source,oldcfg,old)
+
     def measure(m):
         modelroot=results/m['id'];modelroot.mkdir(exist_ok=True)
         key=Path(m['key_file']).read_text().strip();done=[]
@@ -36,7 +42,18 @@ def main(root):
             path=modelroot/(hashlib.sha256(item['id'].encode()).hexdigest()[:20]+'.json')
             if path.exists():done.append(json.loads(path.read_text()));continue
             record={'item_id':item['id'],'source':item['source'],'domain':item['domain'],'model':m['id'],'attempts':[]}
-            if len(done)>=6 and any(x['status']!='completed' for x in done[:6]):
+            candidate=reusable.get(hashlib.sha256(json.dumps(item,sort_keys=True).encode()).hexdigest())
+            if candidate:
+                source,oldcfg,old=candidate
+                matching=[x for x in oldcfg['models'] if x==m]
+                oldpath=source/'results'/m['id']/path.name
+                if matching and oldcfg['max_output_tokens']==cfg['max_output_tokens'] and oldpath.exists():
+                    previous=json.loads(oldpath.read_text())
+                    if previous.get('status')=='completed':
+                        previous.update(reused_from=str(oldpath),new_provider_charge_usd=0)
+                        save(path,previous);done.append(previous);continue
+
+            if len(done)>=len(pilot) and any(x['status']!='completed' for x in done[:len(pilot)]):
                 record.update(status='not_run_preflight_failure');save(path,record);done.append(record);continue
             # A persisted receipt predating a crash must not cause a duplicate provider call.
             reqroot=modelroot/path.stem;reqroot.mkdir(exist_ok=True)
@@ -64,7 +81,11 @@ def main(root):
                         if not choices:raise ValueError('No choices')
                         text=choices[0].get('message',{}).get('content') or '';finish=choices[0].get('finish_reason')
                     record.update(status='completed',text=text,empty=not bool(text.strip()),finish_reason=finish,usage=usage,accounting_complete=charge is not None)
-                    try:record.update(grade(item,text,cfg['rootfs'],root))
+                    try:
+                        if item['kind']=='infobench' and text.strip():
+                            from .random_judge import judge_infobench
+                            record.update(judge_infobench(item,text,cfg,ledger,reqroot))
+                        else:record.update(grade(item,text,cfg['rootfs'],root))
                     except Exception as e:record.update(status='grader_error',error=type(e).__name__+': '+str(e))
                     save(out/'meta.json',call);break
                 except urllib.error.HTTPError as e:
