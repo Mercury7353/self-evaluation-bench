@@ -72,7 +72,7 @@ Each request uses the configured model route and its price. Provider `models` li
 
 ## Researcher interface and isolation
 
-The researcher receives the neutral task/contract, SDK, development model IDs, visible development labels, and explicitly supplied resources. It can synthesize tasks, select existing tasks, or combine methods. It can run small pilots, inspect original job evidence, and request white-box feedback. It cannot access the host run directory, provider keys, hidden targets, holdout models, or external network. This is scoped resource isolation for cooperative research agents, not a hardened service for arbitrary hostile tenants.
+The researcher receives the neutral task/contract, SDK, development model IDs, visible development labels, and explicitly supplied resources. It can synthesize tasks, select existing tasks, or combine methods. It can run small pilots, inspect original job evidence, and request white-box feedback. It cannot access the host run directory, provider keys, hidden targets, holdout models, through the SDK. Researchers have Internet access through shell/Python; candidate identities, non-development score lookup and sealed-target discovery remain forbidden by the research contract. This is scoped resource isolation for cooperative research agents, not a hardened service for arbitrary hostile tenants.
 
 The submission contains `run.py`, `evaluation.json`, `README.md`, and any required assets. A suite runs once for each candidate under a scoped context, produces scored items with call/agent evidence, and declares its fixed aggregation or adaptive selection rule. See [the executable toy example](examples/arithmetic/) and `seb/research_sdk.py`. An optional `predictor.py` implements `fit(training_rows, target_metadata)` and `predict(fitted, observations)`; it receives anonymous numeric item measurements rather than candidate identities. Optional predictor assets go in `predictor_assets/`.
 
@@ -456,3 +456,11 @@ Existing archived runs and their contracts are not modified retroactively.
 Model requests still use the metered gateway; budget, candidate access, and
 held-out-label rules remain part of the experiment protocol. Provider-native
 web-search billing is not implemented; web access is through shell/Python tools.
+
+## Independent model and benchmark visibility
+
+The [Astra expanded contract](contracts/2026-09-19-astra-expanded/config.yaml) fixes two independent axes: the existing four development candidates remain visible, while existing holdouts and all six added candidates stay sealed. A pending candidate stays in the declared sealed panel and is not substituted. Targets are split eight visible/eight sealed, balanced as closely as possible within each domain.
+
+Optional `visibility_contract` version 1 records the exact four ID lists (`development_models`, `sealed_models`, `visible_targets`, `sealed_targets`). Validation rejects partition drift, unequal target counts and missing/unbalanced domain sides before provider calls. This operator-only contract is not placed in the researcher workspace. `whitebox.json` contains only visible targets and development labels; only visible resource directories are copied. Development tokens cannot call held-out candidates. Acceptance measures all available candidates and records pending ones separately; frozen measured scores are joined with visible and sealed labels only on the host. `all-measured`, `sealed-measured`, and `combined-measured` provide operator-only raw-score reports; missing coverage is not silently declared complete.
+
+Provide private reference JSON and curated materials outside Git via `SEB_ASTRA_INPUTS` before validation. The contract package contains no labels or credentials. Internet access is enabled, so sealing is an input/API boundary and a cooperative information-use rule, not a guarantee that public information cannot be found online.

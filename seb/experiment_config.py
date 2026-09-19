@@ -27,7 +27,7 @@ def identifier(value,name):
 def load(path, *, resolve_inputs=True):
     path=Path(path).resolve();cfg=yaml.safe_load(path.read_text())
     if not isinstance(cfg,dict) or cfg.get('version')!=1:raise ValueError('YAML version: 1 required')
-    allowed={'version','name','runtime','providers','researchers','models','auxiliary_models','benchmarks','budgets','design','evaluation','overall','domain_protocol','response_cache'}
+    allowed={'version','name','runtime','providers','researchers','models','auxiliary_models','benchmarks','budgets','design','evaluation','overall','domain_protocol','response_cache','visibility_contract'}
     unknown=set(cfg)-allowed
     if unknown:raise ValueError('Unknown YAML fields: '+', '.join(sorted(unknown)))
     cfg=copy.deepcopy(cfg);cfg['name']=identifier(cfg.get('name'),'name')
@@ -240,6 +240,7 @@ def load(path, *, resolve_inputs=True):
                     development_panel=set(dev)&set(refs)
                     if len(development_panel)<3 or len({dev[m] for m in development_panel})<2:
                         raise ValueError('Insufficient visible development reference coverage for '+target['id'])
+    validate_visibility_contract(cfg)
     if 'response_cache' in cfg:
         from .response_cache import validate_config
         cache=validate_config(cfg['response_cache'])
@@ -248,6 +249,40 @@ def load(path, *, resolve_inputs=True):
             *[r for t in targets['whitebox'] for r in t['resources']]])
     cfg['_config_path']=str(path);cfg['_config_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
     return cfg
+
+
+def validate_visibility_contract(cfg):
+    """Freeze model and target partitions independently, before any paid call.
+
+    Operator-only metadata: never include this contract in researcher_view.
+    A pending endpoint remains a sealed panel member, not a development substitute.
+    """
+    contract=cfg.get('visibility_contract')
+    if contract is None:return
+    fields={'version','development_models','sealed_models','visible_targets','sealed_targets'}
+    if not isinstance(contract,dict) or set(contract)!=fields or contract['version']!=1:
+        raise ValueError('Invalid visibility_contract fields/version')
+    actual={
+        'development_models':[m['id'] for m in cfg['models'] if m['split']=='development'],
+        'sealed_models':[m['id'] for m in cfg['models'] if m['split']=='holdout'],
+        'visible_targets':[t['id'] for t in cfg['benchmarks']['whitebox']],
+        'sealed_targets':[t['id'] for t in cfg['benchmarks']['blackbox']],
+    }
+    for key,ids in actual.items():
+        expected=contract[key]
+        if not isinstance(expected,list) or any(not isinstance(x,str) for x in expected) or len(set(expected))!=len(expected):
+            raise ValueError('visibility_contract.'+key+' requires unique IDs')
+        if set(expected)!=set(ids):
+            raise ValueError('Frozen visibility partition changed: '+key)
+    if len(actual['visible_targets'])!=len(actual['sealed_targets']):
+        raise ValueError('visibility_contract requires equal visible/sealed target counts')
+    domains=cfg.get('domain_protocol',{}).get('domains')
+    if not domains:raise ValueError('visibility_contract requires declared domains')
+    for domain in domains:
+        counts=[sum(t.get('domain')==domain for t in cfg['benchmarks'][side])
+                for side in ('whitebox','blackbox')]
+        if min(counts)<1 or abs(counts[0]-counts[1])>1:
+            raise ValueError('Visible/sealed targets must balance within domain '+domain)
 
 
 def auxiliary_view(cfg):

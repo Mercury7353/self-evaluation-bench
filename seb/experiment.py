@@ -550,6 +550,10 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
                     if config.get('score_mode')=='raw_domain':
                         from .raw_scoring import score_raw_panel
                         reports['all_measured']=score_raw_panel(acceptance/'suite',results,cfg['models'],cfg['_references'],metadata(cfg,'whitebox'),out/'all-measured',minimum_models=cfg['domain_protocol']['minimum_models'])
+                        # Operator-only reports: sealed labels join frozen measurements
+                        # only after researcher access has been revoked.
+                        reports['sealed_measured']=score_raw_panel(acceptance/'suite',results,cfg['models'],cfg['_references'],metadata(cfg,'blackbox'),out/'sealed-measured',minimum_models=cfg['domain_protocol']['minimum_models'])
+                        reports['combined_measured']=score_raw_panel(acceptance/'suite',results,cfg['models'],cfg['_references'],metadata(cfg,'whitebox') | metadata(cfg,'blackbox'),out/'combined-measured',minimum_models=cfg['domain_protocol']['minimum_models'])
                         devmodels=[m for m in cfg['models'] if m['split']=='development']
                         reports['development_measured']=score_raw_panel(acceptance/'suite',results,devmodels,cfg['_references'],metadata(cfg,'whitebox'),out/'development-measured',minimum_models=cfg['domain_protocol']['minimum_models'])
 

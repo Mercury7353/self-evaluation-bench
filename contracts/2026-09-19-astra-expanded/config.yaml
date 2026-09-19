@@ -1,0 +1,547 @@
+version: 1
+name: astra-expanded-two-axis-20260919
+runtime:
+  rootfs: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/joint-campaign-20260913/runtime/science-07/rootfs
+  science_packages: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/joint-campaign-20260913/runtime/science-07/.venv/lib/python3.12/site-packages
+  image_cache: /nfs/hpc/share/zhanyaol/self-evaluation-artifacts/images
+  verifier_network: true
+providers:
+  openai:
+    wire_api: openai_responses
+    upstream: https://api.openai.com/v1
+    key_env: SEB_OPENAI_KEY
+  vectorengine:
+    wire_api: chat_completions
+    upstream: https://api.vectorengine.ai/v1
+    key_env: SEB_VECTORENGINE_KEY
+  deepinfra:
+    wire_api: chat_completions
+    upstream: https://api.deepinfra.com/v1/openai
+    key_env: SEB_DEEPINFRA_KEY
+models:
+- discovery_status: listed_authenticated
+  family: openai
+  id: development-01
+  inference_verified: false
+  label: GPT-5.5
+  model: gpt-5.5-2026-04-23
+  model_key: gpt-5.5
+  provider: openai
+  split: development
+  price:
+    input: 5
+    output: 30
+    cache_read_multiplier: 0.1
+    cache_write_multiplier: 1
+    long_context:
+      threshold_tokens: 272000
+      input_multiplier: 2
+      output_multiplier: 1.5
+  effort: xhigh
+  native_limits:
+    max_context_tokens: 1050000
+    max_output_tokens: 128000
+- discovery_status: listed_public
+  family: zai
+  id: development-06
+  inference_verified: false
+  label: GLM-5.2
+  model: zai-org/GLM-5.2
+  model_key: glm-5.2
+  price:
+    cache_read_multiplier: 0.18666667
+    input: 0.75
+    output: 2.4
+  provider: deepinfra
+  split: development
+  effort: max
+  native_limits:
+    max_context_tokens: 1048576
+    max_output_tokens: 131072
+  allow_unreconciled_usage: true
+- discovery_status: listed_public
+  family: deepseek
+  id: development-08
+  inference_verified: false
+  label: DeepSeek V4 Flash-0731
+  model: deepseek-ai/DeepSeek-V4-Flash-0731
+  model_key: deepseek-v4-flash-0731
+  price:
+    cache_read_multiplier: 0.25
+    input: 0.06
+    output: 0.18
+  provider: deepinfra
+  split: development
+  effort: max
+  native_limits:
+    max_context_tokens: 1048576
+    max_output_tokens: 131072
+- discovery_status: listed_public
+  family: qwen
+  id: development-12
+  inference_verified: false
+  label: Qwen3.8 Max
+  model: Qwen/Qwen3.8-Max
+  model_key: qwen3.8-max
+  price:
+    cache_read_multiplier: 0.12484848
+    input: 1.65
+    output: 4.951
+    reservation_output_floor: 131072
+  provider: deepinfra
+  split: development
+  effort: max
+  native_limits:
+    max_context_tokens: 256000
+    max_output_tokens: 131072
+- discovery_status: listed_authenticated
+  family: openai
+  id: holdout-01
+  inference_verified: false
+  label: GPT-6 Astra
+  model: gpt-6-astra
+  model_key: gpt-6-astra
+  provider: openai
+  split: holdout
+  price:
+    input: 10
+    output: 50
+    cache_read_multiplier: 0.1
+    cache_write_multiplier: 1.25
+    long_context:
+      threshold_tokens: 272000
+      input_multiplier: 2
+      output_multiplier: 1.5
+    budget_cache_discount: true
+  effort: xhigh
+  native_limits:
+    max_context_tokens: 1050000
+    max_output_tokens: 128000
+- discovery_status: listed_authenticated
+  family: openai
+  id: holdout-02
+  inference_verified: false
+  label: GPT-5.6 Sol
+  model: gpt-5.6-sol
+  model_key: gpt-5.6-sol
+  provider: openai
+  split: holdout
+  price:
+    input: 4
+    output: 20
+    cache_read_multiplier: 0.1
+    cache_write_multiplier: 1.25
+    long_context:
+      threshold_tokens: 272000
+      input_multiplier: 2
+      output_multiplier: 1.5
+    budget_cache_discount: true
+  effort: max
+  native_limits:
+    max_context_tokens: 1050000
+    max_output_tokens: 128000
+- discovery_status: listed_public
+  family: moonshot
+  id: holdout-07
+  inference_verified: false
+  label: Kimi K3
+  model: moonshotai/Kimi-K3
+  model_key: kimi-k3
+  price:
+    cache_read_multiplier: 0.1
+    input: 2.85
+    output: 14.25
+    reservation_output_floor: 131072
+  provider: deepinfra
+  split: holdout
+  effort: max
+  native_limits:
+    max_context_tokens: 1048576
+    max_output_tokens: 131072
+  allow_unreconciled_usage: true
+- discovery_status: listed_public
+  family: mimo
+  id: holdout-11
+  inference_verified: false
+  label: MiMo V2.5 Pro
+  model: XiaomiMiMo/MiMo-V2.5-Pro
+  model_key: mimo-v2.5-pro
+  price:
+    cache_read_multiplier: 0.2
+    input: 1.0
+    output: 3.0
+  provider: deepinfra
+  split: holdout
+  effort: max
+  native_limits:
+    max_context_tokens: 1048576
+    max_output_tokens: 131072
+- id: sealed-new-01
+  label: DeepSeek-V3.2
+  family: deepseek-ai
+  model: deepseek-ai/DeepSeek-V3.2
+  provider: deepinfra
+  price:
+    input: 0.26
+    output: 0.38
+    cache_read_multiplier: 0.5
+  effort: high
+  split: holdout
+  native_limits:
+    max_context_tokens: 131072
+    max_output_tokens: 131072
+- id: sealed-new-03
+  label: Gemma 4 31B
+  family: google
+  model: google/gemma-4-31B-it
+  provider: deepinfra
+  price:
+    input: 0.13
+    output: 0.38
+    cache_read_multiplier: 1
+  effort: high
+  split: holdout
+  native_limits:
+    max_context_tokens: 131072
+    max_output_tokens: 131072
+- id: sealed-new-04
+  label: Qwen 3.5
+  family: Qwen
+  model: Qwen/Qwen3.5-397B-A17B
+  provider: deepinfra
+  price:
+    input: 0.45
+    output: 2.9999999999999996
+    cache_read_multiplier: 0.48888889
+  effort: high
+  split: holdout
+  native_limits:
+    max_context_tokens: 131072
+    max_output_tokens: 131072
+- id: sealed-new-05
+  label: GPT-OSS-120B
+  family: openai
+  model: openai/gpt-oss-120b
+  provider: deepinfra
+  price:
+    input: 0.037
+    output: 0.17
+    cache_read_multiplier: 1
+  effort: high
+  split: holdout
+  native_limits:
+    max_context_tokens: 131072
+    max_output_tokens: 131072
+- id: sealed-new-06
+  label: Nemotron 3 Ultra
+  family: nvidia
+  model: nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B
+  provider: deepinfra
+  price:
+    input: 0.5
+    output: 2.2
+    cache_read_multiplier: 0.2
+  effort: high
+  split: holdout
+  native_limits:
+    max_context_tokens: 131072
+    max_output_tokens: 131072
+- id: sealed-new-02
+  label: MiniMax M2.7
+  family: minimax
+  split: holdout
+  availability: pending
+  pending_reason: DeepInfra exact name returned MiniMax-M3; VectorEngine exact M2.7
+    returned403; no substitution.
+researchers:
+- discovery_status: listed_authenticated
+  family: openai
+  id: r-gpt-6-astra
+  inference_verified: false
+  label: GPT-6 Astra
+  model: gpt-6-astra
+  model_key: gpt-6-astra
+  provider: openai
+  price:
+    input: 10
+    output: 50
+    cache_read_multiplier: 0.1
+    cache_write_multiplier: 1.25
+    long_context:
+      threshold_tokens: 272000
+      input_multiplier: 2
+      output_multiplier: 1.5
+    budget_cache_discount: true
+  effort: xhigh
+  native_limits:
+    max_context_tokens: 1050000
+    max_output_tokens: 128000
+  harness: codex
+  prompt_file: ./instructions.txt
+budgets:
+  development_usd: 100
+  researcher_usd: 100
+  evaluation_usd: 120
+  suite_usd: 30
+  item_usd: 30
+design:
+  rounds: 1
+  seconds: 10800
+  checkpoint_seconds: 10800
+  minimum_items: 100
+  final_development_measurement: false
+  continuation:
+    reprompt_remaining_seconds: 5400
+    transport_retries: 2
+evaluation:
+  seconds: 86400
+  model_concurrency: 2
+  requests_per_model: 2
+  preflight: true
+  policy:
+    min_output_tokens: 1
+    default_output_tokens: 8192
+    max_output_tokens: 131072
+    attempt_timeout_seconds: 3600
+    retry_backoff_seconds: 15
+    retry_max_backoff_seconds: 180
+  acceptance_model_concurrency: 5
+domain_protocol:
+  version: 3
+  domains:
+  - coding
+  - co-work
+  - reasoning
+  minimum_models: 3
+  minimum_families: 2
+  allow_pending_references: true
+  score_mode: raw_domain
+overall:
+  metric: macro_pearson
+  source: raw_domain
+  minimum_models: 3
+  constant_prediction: zero
+benchmarks:
+  whitebox:
+  - id: advanced-if
+    domain: co-work
+    scale: 100
+    reference: ${SEB_ASTRA_INPUTS}/references/advanced-if.json
+    resources:
+    - ${SEB_ASTRA_INPUTS}/materials/advanced-if
+    holdout_panel: &id001
+    - holdout-01
+    - holdout-02
+    - holdout-07
+    - holdout-11
+    - sealed-new-01
+    - sealed-new-03
+    - sealed-new-04
+    - sealed-new-05
+    - sealed-new-06
+    - sealed-new-02
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+  - id: deep-swe
+    domain: coding
+    scale: 100
+    reference: ${SEB_ASTRA_INPUTS}/references/deep-swe.json
+    resources:
+    - ${SEB_ASTRA_INPUTS}/materials/deep-swe
+    holdout_panel: *id001
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+  - id: gdpval
+    domain: co-work
+    scale: 100
+    reference: ${SEB_ASTRA_INPUTS}/references/gdpval.json
+    resources:
+    - ${SEB_ASTRA_INPUTS}/materials/gdpval
+    holdout_panel: *id001
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+  - id: hle
+    domain: reasoning
+    scale: 100
+    reference: ${SEB_ASTRA_INPUTS}/references/hle.json
+    resources:
+    - ${SEB_ASTRA_INPUTS}/materials/hle
+    holdout_panel: *id001
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+  - id: scicode
+    domain: coding
+    scale: 100
+    reference: ${SEB_ASTRA_INPUTS}/references/scicode.json
+    resources:
+    - ${SEB_ASTRA_INPUTS}/materials/scicode
+    holdout_panel: *id001
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+  - id: swe-atlas
+    domain: coding
+    scale: 100
+    reference: ${SEB_ASTRA_INPUTS}/references/swe-atlas.json
+    resources:
+    - ${SEB_ASTRA_INPUTS}/materials/swe-atlas
+    holdout_panel: *id001
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+  - id: swe-bench-multilingual
+    domain: coding
+    scale: 100
+    reference: ${SEB_ASTRA_INPUTS}/references/swe-bench-multilingual.json
+    resources:
+    - ${SEB_ASTRA_INPUTS}/materials/swe-bench-multilingual
+    holdout_panel: *id001
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+  - id: arxivmath-202606
+    domain: reasoning
+    scale: 1
+    reference: ${SEB_ASTRA_INPUTS}/references/arxivmath-202606.json
+    resources:
+    - ${SEB_ASTRA_INPUTS}/materials/arxivmath-202606
+    holdout_panel: *id001
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+  blackbox:
+  - id: aa-lcr
+    domain: reasoning
+    scale: 100
+    reference: ${SEB_ASTRA_INPUTS}/references/aa-lcr.json
+    resources: []
+    holdout_panel: *id001
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+  - id: browsecomp
+    domain: co-work
+    scale: 100
+    reference: ${SEB_ASTRA_INPUTS}/references/browsecomp.json
+    resources: []
+    holdout_panel: *id001
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+  - id: deepresearch-bench-ii
+    domain: co-work
+    scale: 100
+    reference: ${SEB_ASTRA_INPUTS}/references/deepresearch-bench-ii.json
+    resources: []
+    holdout_panel: *id001
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+  - id: harvey-lab
+    domain: co-work
+    scale: 100
+    reference: ${SEB_ASTRA_INPUTS}/references/harvey-lab.json
+    resources: []
+    holdout_panel: *id001
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+  - id: program-bench
+    domain: coding
+    scale: 100
+    reference: ${SEB_ASTRA_INPUTS}/references/program-bench.json
+    resources: []
+    holdout_panel: *id001
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+  - id: super-chem
+    domain: reasoning
+    scale: 100
+    reference: ${SEB_ASTRA_INPUTS}/references/super-chem.json
+    resources: []
+    holdout_panel: *id001
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+  - id: swe-bench-verified
+    domain: coding
+    scale: 100
+    reference: ${SEB_ASTRA_INPUTS}/references/swe-bench-verified.json
+    resources: []
+    holdout_panel: *id001
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+  - id: terminal-bench-2-1
+    domain: coding
+    scale: 100
+    reference: ${SEB_ASTRA_INPUTS}/references/terminal-bench-2-1.json
+    resources: []
+    holdout_panel: *id001
+    reference_status: frozen_heterogeneous_public
+    reference_pending_reason: Sparse frozen public references; unavailable cells remain
+      missing, never inferred.
+auxiliary_models:
+- model: gpt-5.5-2026-04-23
+  provider: openai
+  price:
+    input: 5
+    output: 30
+    cache_read_multiplier: 0.1
+    cache_write_multiplier: 1
+    long_context:
+      threshold_tokens: 272000
+      input_multiplier: 2
+      output_multiplier: 1.5
+  effort: xhigh
+  native_limits:
+    max_context_tokens: 1050000
+    max_output_tokens: 128000
+  id: helper-grader
+  roles:
+  - grader
+- model: deepseek-ai/DeepSeek-V4-Flash-0731
+  price:
+    cache_read_multiplier: 0.25
+    input: 0.06
+    output: 0.18
+  provider: deepinfra
+  effort: max
+  native_limits:
+    max_context_tokens: 1048576
+    max_output_tokens: 131072
+  id: helper-simulator
+  roles:
+  - simulator
+  - grader
+visibility_contract:
+  version: 1
+  development_models:
+  - development-01
+  - development-06
+  - development-08
+  - development-12
+  sealed_models: *id001
+  visible_targets:
+  - advanced-if
+  - arxivmath-202606
+  - deep-swe
+  - gdpval
+  - hle
+  - scicode
+  - swe-atlas
+  - swe-bench-multilingual
+  sealed_targets:
+  - aa-lcr
+  - browsecomp
+  - deepresearch-bench-ii
+  - harvey-lab
+  - program-bench
+  - super-chem
+  - swe-bench-verified
+  - terminal-bench-2-1
