@@ -1,0 +1,8 @@
+{
+  "protocol": "2026-09-19-expanded",
+  "execution_code_commit": "d9a557e",
+  "sha256": {
+    "config.yaml": "3676cf9124f612b4fafb8681face05abd96ac8044be8a431c51549fce614734d",
+    "instructions.txt": "baba0cb53176aaac6a7f88ebb8a04f1206d7c5e51615d74b98bf09667df906dc"
+  }
+}

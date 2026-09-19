@@ -4,9 +4,11 @@ Evaluate an **agent researcher's ability to build an inexpensive benchmark**. A 
 
 The pipeline runs **researcher → development feedback → frozen submission → independent model panel → target correlations + overall**. This repository contains reusable infrastructure and synthetic fixtures. Supply your own task resources, target scores, provider credentials, and experiment settings.
 
-## Current experiment contract and Claude handoff
+## Current collaborator contract (2026-09-19)
 
-The [2026-09-15 contract package](contracts/2026-09-15-mixed-v3/index.html) contains the exact researcher instructions and SDK, input/output schemas, material version hashes, current configuration, and known interface limitations. Start from [claude-template.yaml](contracts/2026-09-15-mixed-v3/claude-template.yaml) for a collaborator-run Claude experiment. Fill in the exact model, prices, compatible endpoint and local resource paths; credentials and task/reference datasets are supplied separately. The template is intentionally not runnable until those fields are completed. See the handoff for the Anthropic endpoint-path requirement and cache-accounting differences.
+Start with the **[current collaborator README](contracts/2026-09-19-astra-expanded/README.md)** and its [config](contracts/2026-09-19-astra-expanded/config.yaml) / [exact researcher prompt](contracts/2026-09-19-astra-expanded/instructions.txt). The current contract uses three hours, same-context continuation at 90 minutes remaining, at least 100 distinct questions, three directly measured domain scores, Pearson feedback, independent model/target visibility, and full available-panel acceptance. It requires no predictor.
+
+The `contracts/2026-09-15-*` packages and generic predictor/Spearman descriptions below are historical or other supported modes, **not this campaign's contract**. For Claude or another researcher, follow the current handoff to change only the researcher route/harness and its actual price; preserve shared inputs and evaluation policy. Private frozen input bundles and credentials are supplied separately, so cloning alone is insufficient to reproduce a paid experiment. Do not use the old Claude template's time or scoring settings.
 
 ## Install
 
