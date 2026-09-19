@@ -39,8 +39,11 @@ feedback if another round is configured, and independently evaluates the final f
 
 CONTRACT = '''# Researcher interface
 
-The environment has Python 3.12, the SDK, and the mounted scientific packages. Internet is disabled.
-Only explicitly supplied resources and scoped gateway operations are available. Candidate models and
+The environment has Python 3.12, the SDK, and the mounted scientific packages. Internet is enabled.
+Use shell tools and Python HTTP clients to search the web, download datasets, inspect public trajectories,
+and install research dependencies. There is no network destination allowlist. Record source URLs and
+versions, and include required assets in the frozen submission. Metered model calls still use the SDK.
+Candidate models and
 visible target labels are in whitebox.json. `Client().info()` gives the runtime contract and budget limits.
 
 ```python
@@ -466,7 +469,7 @@ def run(config_path, researcher_id, output, *, mock=False, resume_prelaunch=Fals
                             'effort':researcher.get('effort'),
                             'extra_env':{'SEB_CONTEXT':'/workspace/access.json','PYTHONPATH':'/workspace:/opt/science'},
                             'extra_binds':[(cfg['runtime']['science_packages'],'/opt/science',True)],
-                            'stop_requested':lifecycle.poll}
+                            'stop_requested':lifecycle.poll, 'research_network':True}
                         if researcher['harness']=='codex':
                             rc=launch_codex(root,work,trace,config['gateway_socket'],tokens['designer'],researcher['model'],prompt,
                                 binary=cfg['runtime'].get('codex_binary'),resume_thread=previous_session,

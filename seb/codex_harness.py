@@ -2,6 +2,7 @@
 import hashlib
 import json
 import shutil
+import socket
 import sys
 import time
 from pathlib import Path
@@ -20,7 +21,7 @@ def runtime_files(binary=None):
 
 
 def _launch_codex_once(root, workspace, trace, gateway_socket, designer_token, model, prompt,
-                 *, timeout, effort, binary=None, resume_thread=None, extra_env=None, extra_binds=(), stop_requested=None):
+                 *, timeout, effort, binary=None, resume_thread=None, extra_env=None, extra_binds=(), stop_requested=None, research_network=False):
     trace = Path(trace).resolve(); trace.mkdir(parents=True, exist_ok=True)
     workspace = Path(workspace).resolve()
     # Keep async I/O pools within shared HPC thread quotas. This does not cap
@@ -36,22 +37,28 @@ def _launch_codex_once(root, workspace, trace, gateway_socket, designer_token, m
         with path.open('rb') as stream:hashes[str(path)]=hashlib.file_digest(stream,'sha256').hexdigest()
     (trace/'runtime.json').write_text(json.dumps({'model':model,'effort':effort,
         'sdk_version':json.loads((harness/'node_modules/@openai/codex-sdk/package.json').read_text())['version'],
-        'files_sha256':hashes,'isolated_network':True,'tokio_worker_threads':int(runtime_threads)},indent=2))
+        'files_sha256':hashes,'isolated_network':not research_network,'tokio_worker_threads':int(runtime_threads)},indent=2))
+    port = 18765
+    if research_network:
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            port = listener.getsockname()[1]
+    base_url = f'http://127.0.0.1:{port}'
     prompt_file = trace / 'prompt.txt'; prompt_file.write_text(prompt)
     wrapper = trace / 'codex-wrapper'
     wrapper.write_text(f'#!{sys.executable}\nimport sys\nsys.path.insert(0, {str(repo)!r})\nfrom seb.codex_wrapper import main\nmain()\n')
     wrapper.chmod(0o700)
     config = dict(wrapper=str(wrapper), model=model, effort=effort, binary=str(binary), rootfs=str(root),
                   workspace=str(workspace), trace=str(trace), gateway_socket=str(gateway_socket),
-                  baseUrl='http://127.0.0.1:18765/v1', promptFile=str(prompt_file), threadFile=str(trace/'thread.json'),
+                  baseUrl=base_url+'/v1', research_network=research_network, promptFile=str(prompt_file), threadFile=str(trace/'thread.json'),
                   extra_binds=[(str(s),str(t),ro) for s,t,ro in extra_binds],
                   resumeThread=resume_thread, container_launch={
-                      'enable_loopback': True, 'proxy_port': 18765, 'cwd': '/workspace',
+                      'enable_loopback': not research_network, 'proxy_port': port, 'cwd': '/workspace',
                       'env': {**(extra_env or {}), 'HOME': '/workspace', 'CODEX_HOME': '/workspace/.codex',
                               'TOKIO_WORKER_THREADS':runtime_threads,
                               'SEB_DESIGNER_TOKEN': designer_token,
                               'PYTHONPATH': (extra_env or {}).get('PYTHONPATH','/workspace'),
-                              'SEB_GATEWAY_URL': 'http://127.0.0.1:18765'}})
+                              'SEB_GATEWAY_URL': base_url}})
     if resume_thread and not any((workspace/'.codex/sessions').rglob('*'+resume_thread+'*.jsonl')):
         raise ValueError('Requested resume thread is absent from the isolated workspace')
     private = trace / 'sdk.private.json'
@@ -82,11 +89,11 @@ def transport_failure(trace):
 
 def launch_codex(root, workspace, trace, gateway_socket, designer_token, model, prompt,
                  *, timeout, effort, binary=None, resume_thread=None, extra_env=None,
-                 extra_binds=(), stop_requested=None, continuation_policy=None):
+                 extra_binds=(), stop_requested=None, continuation_policy=None, research_network=False):
     if not continuation_policy:
         return _launch_codex_once(root,workspace,trace,gateway_socket,designer_token,model,prompt,
             timeout=timeout,effort=effort,binary=binary,resume_thread=resume_thread,
-            extra_env=extra_env,extra_binds=extra_binds,stop_requested=stop_requested)
+            extra_env=extra_env,extra_binds=extra_binds,stop_requested=stop_requested,research_network=research_network)
     trace=Path(trace);trace.mkdir(parents=True,exist_ok=True)
     deadline=time.monotonic()+timeout
     threshold=continuation_policy['reprompt_remaining_seconds']
@@ -97,7 +104,7 @@ def launch_codex(root, workspace, trace, gateway_socket, designer_token, model, 
         attempt=trace/f'attempt-{len(records)+1:03d}'
         rc=_launch_codex_once(root,workspace,attempt,gateway_socket,designer_token,model,current_prompt,
             timeout=max(0.001,remaining),effort=effort,binary=binary,resume_thread=resume_thread,
-            extra_env=extra_env,extra_binds=extra_binds,stop_requested=stop_requested)
+            extra_env=extra_env,extra_binds=extra_binds,stop_requested=stop_requested,research_network=research_network)
         # The parent is a documented final-attempt projection for existing consumers.
         # Every prior attempt, including failed terminal events, remains immutable.
         for name in ('codex.stdout','codex.stderr','codex.process.json','thread.json','runtime.json'):

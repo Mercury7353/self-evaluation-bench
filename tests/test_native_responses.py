@@ -186,8 +186,9 @@ def test_native_actual_usage_overshoot_closes_wallet(tmp_path, upstream):
     assert app.state.ledger.status('designer')[0]['cap'] == 0
 
 
+@pytest.mark.parametrize('research_network', [False, True])
 @pytest.mark.parametrize('model,effort', [('gpt-5.5-2026-04-23','xhigh'), ('gpt-5.6-sol','max'), ('gpt-6-astra','xhigh')])
-def test_actual_codex_sdk_tool_roundtrip_inside_isolated_namespace(tmp_path, upstream, model, effort):
+def test_actual_codex_sdk_tool_roundtrip_inside_isolated_namespace(tmp_path, upstream, model, effort, research_network):
     root = os.environ.get('SEB_TEST_ROOT')
     if not root:
         pytest.skip('Set SEB_TEST_ROOT for real Codex SDK integration')
@@ -206,7 +207,7 @@ def test_actual_codex_sdk_tool_roundtrip_inside_isolated_namespace(tmp_path, ups
                       "assert os.environ['TOKIO_WORKER_THREADS']=='4'; "
                       "assert json.load(urllib.request.urlopen(os.environ['SEB_GATEWAY_URL']+'/health'))['status']=='ok'; "
                       f'assert not os.path.exists({str(canary)!r}); '
-                      f's=socket.socket();s.settimeout(1);assert s.connect_ex(("127.0.0.1",{server.server_port}))!=0; '
+                      f's=socket.socket();s.settimeout(1);assert (s.connect_ex(("127.0.0.1",{server.server_port}))==0)=={research_network}; '
                       'open("marker.txt","w").write("SDK_TOOL_OK"); print("SDK_TOOL_OK")')
             command = {'cmd': 'python -c ' + shlex.quote(script)}
             if any(t.get('name')=='exec_command' for t in body.get('tools',[])):
@@ -243,7 +244,7 @@ def test_actual_codex_sdk_tool_roundtrip_inside_isolated_namespace(tmp_path, ups
             while not gateway.started and time.monotonic() < deadline: time.sleep(.02)
             assert gateway.started
             rc = launch_codex(image, work, tmp_path / 'trace', address, 'native-test-key',
-                model, 'Use a shell to write marker.txt, then finish.', timeout=60, effort=effort)
+                model, 'Use a shell to write marker.txt, then finish.', timeout=60, effort=effort, research_network=research_network)
             check_designer_exit(tmp_path / 'trace', rc, harness='codex')
             assert rc == 0, (tmp_path / 'trace/codex.stderr').read_text()
             assert (work / 'marker.txt').read_text() == 'SDK_TOOL_OK'
@@ -255,6 +256,7 @@ def test_actual_codex_sdk_tool_roundtrip_inside_isolated_namespace(tmp_path, ups
             runtime=json.loads((tmp_path/'trace/runtime.json').read_text())
             assert runtime['model']==model and runtime['effort']==effort and runtime['sdk_version']=='0.153.4'
             assert runtime['tokio_worker_threads']==4
+            assert runtime['isolated_network'] is (not research_network)
             assert len(runtime['files_sha256'])==5 and all(len(v)==64 for v in runtime['files_sha256'].values())
             wallet = app.state.ledger.status('designer')[0]
             assert wallet['calls'] == 2 and wallet['outstanding'] == 0
@@ -267,7 +269,7 @@ def test_actual_codex_sdk_tool_roundtrip_inside_isolated_namespace(tmp_path, ups
                 cfg['tokens']['continued-native-key'] = cfg['tokens'].pop('native-test-key')
                 rc = launch_codex(image, work, tmp_path/'continued-trace', address, 'continued-native-key',
                     model, 'Continue the same task after an infrastructure interruption.',
-                    timeout=60, effort=effort, resume_thread=thread_id)
+                    timeout=60, effort=effort, resume_thread=thread_id, research_network=research_network)
                 check_designer_exit(tmp_path/'continued-trace', rc, harness='codex')
                 assert json.loads((tmp_path/'continued-trace/thread.json').read_text())['thread_id'] == thread_id
                 assert len(received) == 3 and 'SDK_PREFLIGHT_OK' in json.dumps(json.loads(received[-1][1])['input'])

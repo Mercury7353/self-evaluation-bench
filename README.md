@@ -443,3 +443,16 @@ For the Codex researcher, `design.continuation: {reprompt_remaining_seconds: 540
 A closed development or researcher accounting wallet stops research as an infrastructure guard, rather than silently accepting an early finish. This differs from ordinary budget exhaustion. For a provider observed to exceed its requested output limit, `price.reservation_output_floor` can reserve a conservative output bound without changing the actual request or usage-based charge. This does not guarantee provider compliance and does not release earlier unknown charges. Experiments with these settings must be identified separately from earlier single-return runs.
 
 Acceptance parallelism can be configured separately with `evaluation.acceptance_model_concurrency: 4`; it defaults to `model_concurrency` for compatibility. Both controller submissions and the gateway evaluation queue use it. Development concurrency and per-model request limits are unchanged. Set this before launching; it does not hot-reconfigure a running frozen experiment.
+
+### Researcher Internet access
+
+New experiment launches enable unrestricted destination access from the researcher
+container for both Codex and Claude harnesses. Use shell HTTP clients to search,
+fetch public data/trajectories, and install dependencies; record sources and freeze
+required assets. The contract describes this access explicitly. Codex uses a
+per-launch loopback gateway port to allow concurrent network-enabled researchers.
+The low-level launcher retains an offline option for tests and other callers.
+Existing archived runs and their contracts are not modified retroactively.
+Model requests still use the metered gateway; budget, candidate access, and
+held-out-label rules remain part of the experiment protocol. Provider-native
+web-search billing is not implemented; web access is through shell/Python tools.

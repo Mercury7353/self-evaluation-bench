@@ -24,7 +24,7 @@ def main():
              (package / 'sandbox_entry.py', '/opt/seb_entry.py', True),
              (path, '/run/launch.json', True), *config.get('extra_binds', [])]
     args = contained(config['rootfs'], ['/usr/local/bin/python', '/opt/seb_entry.py'],
-                     cwd='/workspace', network=False, binds=binds)
+                     cwd='/workspace', network=config.get('research_network', False), binds=binds)
     os.execv('/usr/bin/bwrap', args)
 
 
