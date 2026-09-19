@@ -134,8 +134,8 @@ def load(path, *, resolve_inputs=True):
             raise ValueError('Invalid reprompt threshold')
         if type(policy['transport_retries']) is not int or not 0<=policy['transport_retries']<=5:
             raise ValueError('Invalid transport retry count')
-        if any(r['harness']!='codex' for r in researchers):
-            raise ValueError('Continuation currently requires the Codex harness')
+        if any(r['harness'] not in ('codex','claude_code') for r in researchers):
+            raise ValueError('Continuation requires a native Codex or Claude harness')
     if 'domain_protocol' in cfg:
         protocol=cfg['domain_protocol']
         if not isinstance(protocol,dict) or protocol.get('version') not in (1,2,3):

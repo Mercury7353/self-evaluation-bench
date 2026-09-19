@@ -176,7 +176,7 @@ def build_task(environment, destination, cache, logdir):
             'namespace_compatibility':{'tar_no_same_owner':True,'apt_sandbox_user':'root'}}
 
 
-def launch_claude(root, workspace, trace, gateway_socket, token, model, prompt, *, timeout, effort=None, extra_env=None, output_tokens=16384, research_network=False, resume_session=None, extra_binds=(), stop_requested=None):
+def _launch_claude_once(root, workspace, trace, gateway_socket, token, model, prompt, *, timeout, effort=None, extra_env=None, output_tokens=16384, research_network=False, resume_session=None, extra_binds=(), stop_requested=None):
     trace=Path(trace);trace.mkdir(parents=True,exist_ok=True)
     root=Path(root)
     package=Path(__file__).parent.resolve()
@@ -214,3 +214,11 @@ def launch_claude(root, workspace, trace, gateway_socket, token, model, prompt, 
     # Never retain scoped auth in the public artifact manifest.
     launchfile.unlink(missing_ok=True)
     return rc
+
+
+def launch_claude(root, workspace, trace, gateway_socket, token, model, prompt, *, timeout, continuation_policy=None, **kwargs):
+    if continuation_policy:
+        from .claude_continuation import launch
+        return launch(_launch_claude_once,root,workspace,trace,gateway_socket,token,model,prompt,
+                      timeout=timeout,continuation_policy=continuation_policy,**kwargs)
+    return _launch_claude_once(root,workspace,trace,gateway_socket,token,model,prompt,timeout=timeout,**kwargs)
