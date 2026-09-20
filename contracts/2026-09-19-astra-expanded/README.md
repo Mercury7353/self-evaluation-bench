@@ -94,3 +94,28 @@ preflight使用同一计费通道，费用进原开发钱包。端点“能发�
 代码commit；精确researcher模型/provider/harness/effort；最终配置与输入哈希；作业ID/起止时间；研究轨迹与版本/开发job ID；冻结快照和冻结原因；全候选逐题结果、空答/infra与缺测；原始usage和完整账本；原生及共同面板报表。
 大文件、真实题库、轨迹、key不提交Git；私下提供artifact位置/哈希。
 仓库内 `contract-lock.json` 固定本包配置与prompt哈希，`runtime-code-lock.json`对应实际Astra启动时执行代码哈希；更换researcher后的本地配置需另存哈希和差异，不能声称文件字节完全相同。
+
+## 冻结输入包实际交付（2026-09-20）
+
+输入完整存在于原服务器，已打成私有传输包；它不随 Git clone 下载。
+具体文件大小与 SHA256 见本目录 `input-bundle-summary.json`；逐文件摘要见 `input-manifest.json`。
+
+服务器包路径：
+`/nfs/hpc/share/zhanyaol/self-evaluation-artifacts/input-handoff-20260920/astra-expanded-20260919-inputs.tar.gz`
+
+有授权SSH访问的操作员可用SCP取包（填写真实可达服务器/账号），不要把SSH或API密钥交给researcher：
+
+```bash
+scp YOUR_USER@YOUR_SSH_HOST:/nfs/hpc/share/zhanyaol/self-evaluation-artifacts/input-handoff-20260920/astra-expanded-20260919-inputs.tar.gz .
+sha256sum astra-expanded-20260919-inputs.tar.gz
+# 对照 input-bundle-summary.json 中的 archive_sha256 后解包到操作员私有目录。
+mkdir -p private-frozen-inputs
+tar -xzf astra-expanded-20260919-inputs.tar.gz -C private-frozen-inputs
+python contracts/2026-09-19-astra-expanded/verify-inputs.py   --inputs private-frozen-inputs/inputs   --manifest contracts/2026-09-19-astra-expanded/input-manifest.json
+export SEB_ASTRA_INPUTS="$(pwd)/private-frozen-inputs/inputs"
+```
+
+没有服务器访问权限时，需要另提供私有传输位置；GitHub上的摘要不是数据下载链接。
+输入包含sealed参考标签，仅供操作员控制器读取；不得把输入根目录或本操作员文档挂给researcher。
+只有visible获准材料及开发标签由既有控制器筛选后进入研究环境。
+8个visible材料目录不意味着每个都有完整原题/轨迹，具体覆盖见本README前文；不得自行补最新榜单改变输入。

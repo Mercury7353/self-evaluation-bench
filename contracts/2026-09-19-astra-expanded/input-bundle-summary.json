@@ -1,0 +1,8 @@
+{
+  "archive": "/nfs/hpc/share/zhanyaol/self-evaluation-artifacts/input-handoff-20260920/astra-expanded-20260919-inputs.tar.gz",
+  "archive_bytes": 2225141561,
+  "archive_sha256": "56fe5ea0971667dbcdb44d0314fa0ad46d6890530a90d9848e51ca82eb3d1bf1",
+  "files": 1732,
+  "input_bytes": 2328034210,
+  "manifest_sha256": "8fbcd703c1e029e23ef4d520f8d286952078c79bbe808f1bbcb54a9aa50ab089"
+}
