@@ -146,10 +146,11 @@ def main():
             row = json.loads(saved.read_text())
             # Preserve terminal wrong/empty answers; retries only happen inside
             # this operation, never silently across controller restarts.
-            with mutex:
-                results[(mid, iid)] = row
-                persist()
-            return
+            if row['execution_status'] == 'completed' or not cfg.get('resume_authorization'):
+                with mutex:
+                    results[(mid, iid)] = row
+                    persist()
+                return
         if model_stop[mid].is_set() or time.time() >= deadline or (out / 'STOP').exists():
             return
         row = {'id': iid, 'question_id': item['question_id'], 'route': 'codex-chatgpt-login',
@@ -158,7 +159,10 @@ def main():
                'original_output_cap_enforced': False,
                'requested_model': model['model'], 'effort': model['effort'],
                'prompt_sha256': hashlib.sha256(prompts[item['question_id']].encode()).hexdigest()}
-        for attempt in range(1, cfg.get('attempts', 3) + 1):
+        previous_attempts = sorted(location.glob('attempt-*'))
+        first_attempt = max([int(p.name.split('-')[-1]) for p in previous_attempts] + [0]) + 1
+        row['prior_attempts_retained'] = [str(p) for p in previous_attempts]
+        for attempt in range(first_attempt, first_attempt + cfg.get('attempts', 3)):
             if time.time() >= deadline or model_stop[mid].is_set() or (out / 'STOP').exists():
                 break
             attempt_dir = location / f'attempt-{attempt:02d}'
@@ -208,7 +212,7 @@ def main():
             if any(x in lower for x in ('usage limit', 'quota', 'not supported', 'model_not_found', 'unsupported', 'unauthorized', 'authentication', 'policy', 'forbidden')):
                 model_stop[mid].set()
                 break
-            if attempt < cfg.get('attempts', 3):
+            if attempt < first_attempt + cfg.get('attempts', 3) - 1:
                 time.sleep(min(30, 5 * attempt))
         dump(saved, row)
         with mutex:
