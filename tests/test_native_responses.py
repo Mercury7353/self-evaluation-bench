@@ -14,6 +14,67 @@ from fastapi.testclient import TestClient
 from seb.billing import cache_adjusted_cost
 from seb.gateway import create_app, cost
 from seb.native_responses import request_bound, usage_cost
+from seb.native_compat import upstream_body
+
+
+@pytest.mark.parametrize('tools_field', [{}, {'tools': []}])
+@pytest.mark.parametrize('choice', ['auto', 'none'])
+def test_xai_toolless_selector_only_removes_redundant_field(tools_field, choice):
+    body = {'model': 'grok-4.7', 'tool_choice': choice, **tools_field,
+            'input': [{'type': 'reasoning', 'encrypted_content': 'opaque'},
+                      {'role': 'user', 'content': 'CONTEXT CHECKPOINT COMPACTION'}],
+            'reasoning': {'effort': 'xhigh'}, 'prompt_cache_key': 'same-session'}
+    raw = json.dumps(body).encode()
+    fixed = json.loads(upstream_body(raw, 'grok-4.7'))
+    assert fixed == {k: v for k, v in body.items() if k != 'tool_choice'}
+    assert upstream_body(raw, 'gpt-5.6-sol') == raw
+
+
+@pytest.mark.parametrize('extra', [
+    {'tools': [{'type': 'function', 'name': 'shell'}], 'tool_choice': 'auto'},
+    {'tools': [], 'tool_choice': 'required'},
+    {'tools': [], 'tool_choice': {'type': 'function', 'name': 'shell'}},
+    {'tools': []}, {'tools': None, 'tool_choice': 'auto'},
+])
+def test_xai_compat_does_not_change_tools_or_weaken_required_choices(extra):
+    raw = json.dumps({'model': 'grok-4.7', **extra}).encode()
+    assert upstream_body(raw, 'grok-4.7') == raw
+
+
+def test_xai_toolless_compaction_then_tool_turn_and_replay(tmp_path, upstream):
+    server, received = upstream
+    original_responder = server.respond
+    def respond(path, body):
+        if not body.get('tools') and 'tool_choice' in body:
+            return 400, b'{"error":"tool_choice without tools"}', 'application/json'
+        return original_responder(path, body)
+    server.respond = respond
+    cfg = config(tmp_path, server)
+    cfg['native_researcher']['model'] = 'grok-4.7'
+    cfg['model_backends']['researcher']['model'] = 'grok-4.7'
+    app = create_app(cfg)
+    body = payload(model='grok-4.7', tools=[], tool_choice='auto',
+                   input=[{'role': 'user', 'content': 'CONTEXT CHECKPOINT COMPACTION'}])
+    raw = json.dumps(body).encode()
+    headers = {'x-api-key': 'native-test-key', 'x-seb-operation-id': 'compaction'}
+    with TestClient(app) as client:
+        result = client.post('/v1/responses', content=raw, headers=headers)
+        replay = client.post('/v1/responses', content=raw, headers=headers)
+        tool_body = payload(model='grok-4.7', tool_choice='auto', input=[],
+                            tools=[{'type': 'function', 'name': 'shell', 'parameters': {'type': 'object'}}])
+        continued = client.post('/v1/responses', json=tool_body,
+                                headers={'x-api-key': 'native-test-key'})
+    assert result.status_code == continued.status_code == replay.status_code == 200
+    assert replay.headers['x-seb-replayed'] == 'true'
+    assert len(received) == 2
+    first, second = [json.loads(row[1]) for row in received]
+    assert first == {k:v for k,v in body.items() if k != 'tool_choice'}
+    assert second == tool_body
+    folder = Path(app.state.ledger.path).parent / 'native-wire' / result.headers['x-seb-request-id']
+    assert (folder / 'request.body').read_bytes() == raw
+    assert json.loads((folder / 'upstream.request.body').read_bytes()) == first
+    wallet = app.state.ledger.status('designer')[0]
+    assert wallet['calls'] == 2 and wallet['outstanding'] == 0
 
 
 PRICE = {'input': 4, 'output': 20, 'cache_read_multiplier': .1, 'cache_write_multiplier': 1.25,

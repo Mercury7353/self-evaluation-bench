@@ -337,6 +337,14 @@ charges and separate cache-adjusted estimates. SDK events live in each
 `researcher-trace-N/codex.stdout`. Nonfatal SDK item warnings do not turn a completed
 turn into a failed run; terminal errors and unfinished zero-exit turns do.
 
+For the `grok-4.7` route, tool-less requests omit a redundant `tool_choice`
+value of `auto` or `none` before forwarding. This includes Codex's context-summary
+requests sent through `/responses`. Requests with tools, required/named choices,
+and other models remain unchanged. Both the original `request.body` and forwarded
+`upstream.request.body` are saved for audit. This narrow compatibility fix does
+not enable retries or prove complete SDK/provider compatibility. Run the local
+fake-upstream regression with `python -m pytest tests/test_native_responses.py -q`.
+
 ## Artifacts and accounting
 
 Each private run directory contains:

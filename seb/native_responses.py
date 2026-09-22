@@ -1,6 +1,7 @@
 """Native researcher Responses transport using the episode's bounded ledger.
 
-The SDK wire body is not translated. Only the configured researcher token may
+The SDK wire body is retained; native_compat documents narrow upstream fixes.
+Only the configured researcher token may
 use these routes. Unknown calls remain reserved; the transport never retries.
 """
 import asyncio
@@ -17,6 +18,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from .ledger import BudgetExceeded
+from .native_compat import upstream_body
 
 
 def usage_cost(usage, price, *, cached=False):
@@ -156,6 +158,7 @@ def install_routes(app, config, ledger, access):
         try:
             body = json.loads(raw)
             amount = request_bound(body, spec, price, compact=compact)
+            raw_upstream = upstream_body(raw, spec['model'])
         except (ValueError, KeyError, TypeError, AttributeError) as error:
             return JSONResponse({'error': str(error)}, 400)
         operation_id = request.headers.get('x-seb-operation-id', uuid.uuid4().hex)
@@ -177,6 +180,7 @@ def install_routes(app, config, ledger, access):
             return Response((folder / 'response.body').read_bytes(), status_code=previous['http_status'],
                             media_type=previous['media_type'], headers={'x-seb-replayed': 'true'})
         (folder / 'request.body').write_bytes(raw)
+        (folder / 'upstream.request.body').write_bytes(raw_upstream)
         meta = {'id': ident, 'operation_id': operation_id, 'fingerprint': fingerprint,
                 'wallet': entry['wallet'], 'model': model_id, 'provider_model': spec['model'],
                 'protocol': 'native-responses', 'path': request.url.path, 'created': time.time(),
@@ -195,7 +199,7 @@ def install_routes(app, config, ledger, access):
         key = Path(backend['key_file']).read_text().strip()
         address = backend['upstream'].rstrip('/') + ('/responses/compact' if compact else '/responses')
         try:
-            response = await client.send(client.build_request('POST', address, content=raw,
+            response = await client.send(client.build_request('POST', address, content=raw_upstream,
                 headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}), stream=True)
         except (Exception, asyncio.CancelledError) as error:
             ledger.finish(ident, None, {}, 'transport_unknown')
