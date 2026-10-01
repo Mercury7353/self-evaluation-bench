@@ -1,0 +1,6 @@
+'use strict';
+(async()=>{try{const response=await fetch('data/index.json');if(!response.ok)throw Error();const data=await response.json();
+const el=id=>document.getElementById(id);
+function render(){let rows=data.runs.filter(r=>r.name.toLowerCase().includes(el('search').value.toLowerCase())&&(!el('harness').value||r.harness===el('harness').value));const key=el('sort').value;rows.sort((a,b)=>key==='name'?a.name.localeCompare(b.name):b[key]-a[key]);el('runs').replaceChildren();for(const row of rows){const tr=document.createElement('tr');const name=document.createElement('td');name.className='name';const link=document.createElement('a');link.href='run.html?id='+encodeURIComponent(row.id);link.textContent=row.name;name.append(link);tr.append(name);for(const value of [row.harness,row.questions,row.events,row.snapshots,row.score.toFixed(2),row.pa.toFixed(2)]){const td=document.createElement('td');td.textContent=value;tr.append(td)}el('runs').append(tr)}el('catalog-status').textContent=`${rows.length} research runs · source-linked trajectories and frozen evaluations`;}
+for(const id of ['search','harness','sort'])el(id).addEventListener(id==='search'?'input':'change',render);render();
+}catch(e){document.getElementById('catalog-status').textContent='Run directory could not be loaded. Please refresh.'}})();

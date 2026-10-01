@@ -1,0 +1,19 @@
+# Project website
+
+The static project website is in `website/`, including the leaderboard and the already-public, sanitized researcher records. This directory is a publication export, not raw experiment output. Never put credentials or private run artifacts here.
+
+GitHub Pages URL: https://mercury7353.github.io/self-evaluation-bench/
+
+## One-time setup
+
+A repository administrator must open Settings → Pages and select **GitHub Actions** as the build source. Then run **Deploy project website** from the Actions tab (or rerun its latest run). No custom domain or payment is needed for this public repository.
+
+The workflow uses GitHub's built-in token with contents-read, pages-write, and OIDC permissions. No model APIs or provider secrets are required.
+
+## Update and preview
+
+Edit files under `website/` and push to `main`; the workflow publishes that directory. Internal links are relative to support repository-prefixed URLs. Leaderboard data is in `website/data.json`; published trace exports are in `website/traces/data/`.
+
+Run `python -m http.server 8000 --directory website` and open http://localhost:8000/ to preview.
+
+Once arXiv is public, set `paperUrl` in `website/data.json` to show the Paper link.

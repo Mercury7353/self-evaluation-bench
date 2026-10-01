@@ -1,5 +1,7 @@
 # Self-Evaluation Bench
 
+[Project website](https://mercury7353.github.io/self-evaluation-bench/) · [Website deployment](docs/website.md)
+
 Evaluate an **agent researcher's ability to build an inexpensive benchmark**. A YAML experiment selects the researcher, candidate models and model families, visible/hidden target benchmarks, resource access, budgets, and execution policy.
 
 The pipeline runs **researcher → development feedback → frozen submission → independent model panel → target correlations + overall**. This repository contains reusable infrastructure and synthetic fixtures. Supply your own task resources, target scores, provider credentials, and experiment settings.
