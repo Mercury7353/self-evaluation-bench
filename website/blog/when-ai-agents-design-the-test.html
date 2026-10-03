@@ -1,0 +1,1263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>When AI Agents Design the Test</title>
+<meta name="description" content="Three lessons from EvalResearchBench about the gap between doing research and building a useful evaluation.">
+<meta property="og:type" content="article">
+<meta property="og:title" content="When AI Agents Design the Test">
+<meta property="og:description" content="Three lessons from EvalResearchBench about the gap between doing research and building a useful evaluation.">
+<meta property="article:published_time" content="2026-10-03">
+<meta property="article:modified_time" content="2026-10-03">
+<meta property="og:url" content="https://mercury7353.github.io/self-evaluation-bench/blog/when-ai-agents-design-the-test.html">
+<link rel="canonical" href="https://mercury7353.github.io/self-evaluation-bench/blog/when-ai-agents-design-the-test.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap">
+<script>try{var st=localStorage.getItem("erb-theme");if(st==="dark"||st==="light")document.documentElement.setAttribute("data-theme",st)}catch(e){}</script>
+<style>
+/* ============================================================
+   Tokens: warm paper + oxblood, after the reference article style
+   ============================================================ */
+:root {
+  --paper: #F6F3EC; --paper-2: #EFEBE1;
+  --ink: #15141A; --ink-2: #2A2830; --ink-3: #5E5B66; --ink-4: #6A6674;
+  --rule: #D9D3C3; --rule-2: #E6E1D2;
+  --accent: #7A1A1A; --accent-soft: rgba(122,26,26,0.08); --link-line: rgba(122,26,26,0.38);
+  /* chart series: blue = primary/frozen, red = alternative/failure, purple = third highlight */
+  --c1: #2F6FD6; --c2: #C8432F; --c3: #8446C4; --cn: #A6A2AC; --cn-soft: rgba(106,102,116,0.16);
+  --c1-soft: rgba(47,111,214,0.12); --c2-soft: rgba(200,67,47,0.12);
+  --font-serif: 'Newsreader', 'Iowan Old Style', Georgia, serif;
+  --font-sans: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  --max: 1180px; --gutter: clamp(16px, 4vw, 56px);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #161519; --paper-2: #1F1E24;
+    --ink: #EDE9DE; --ink-2: #D8D4C9; --ink-3: #A09CA6; --ink-4: #8A8791;
+    --rule: #34313C; --rule-2: #2A2832;
+    --accent: #D0705F; --accent-soft: rgba(208,112,95,0.13); --link-line: rgba(208,112,95,0.45);
+    --c1: #6E9EF0; --c2: #E8735E; --c3: #B48AE6; --cn: #6F6C78; --cn-soft: rgba(200,196,210,0.14);
+    --c1-soft: rgba(110,158,240,0.16); --c2-soft: rgba(232,115,94,0.16);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #161519; --paper-2: #1F1E24;
+  --ink: #EDE9DE; --ink-2: #D8D4C9; --ink-3: #A09CA6; --ink-4: #8A8791;
+  --rule: #34313C; --rule-2: #2A2832;
+  --accent: #D0705F; --accent-soft: rgba(208,112,95,0.13); --link-line: rgba(208,112,95,0.45);
+  --c1: #6E9EF0; --c2: #E8735E; --c3: #B48AE6; --cn: #6F6C78; --cn-soft: rgba(200,196,210,0.14);
+  --c1-soft: rgba(110,158,240,0.16); --c2-soft: rgba(232,115,94,0.16);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; overflow-x: clip; }
+body { font-family: var(--font-sans); background: var(--paper); color: var(--ink); line-height: 1.55; font-size: 16px; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+a { color: inherit; text-decoration: none; }
+img, svg { display: block; max-width: 100%; }
+::selection { background: var(--accent); color: #fff; }
+.skip-link { position: absolute; left: -9999px; }
+.skip-link:focus { left: 16px; top: 12px; background: var(--paper); padding: 6px 10px; border: 1px solid var(--rule); z-index: 99; }
+
+/* ---------- article layout ---------- */
+.ar-page { max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter) 96px; display: grid; grid-template-columns: 200px minmax(0, 720px); column-gap: clamp(32px, 4vw, 56px); justify-content: center; }
+.ar-head { grid-column: 2; }
+.ar-toc { grid-column: 1; grid-row: 2; position: sticky; top: 32px; align-self: start; margin-top: 8px; min-width: 0; }
+.ar-main { grid-column: 2; min-width: 0; }
+.ar-crumb { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-4); margin: 36px 0 44px; display: flex; gap: 10px; min-width: 0; }
+.ar-crumb b { font-weight: 500; color: var(--ink-3); }
+.ar-crumb span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ar-eyebrow { display: flex; align-items: center; gap: 12px; font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-4); margin-bottom: 22px; }
+.ar-head h1 { font-family: var(--font-serif); font-weight: 400; font-size: clamp(36px, 4.6vw, 52px); line-height: 1.06; letter-spacing: -0.02em; margin: 0; }
+.ar-standfirst { font-family: var(--font-serif); font-size: clamp(17px, 1.5vw, 20px); line-height: 1.55; color: var(--ink-2); margin: 18px 0 0; }
+.ar-authors { display: flex; align-items: center; gap: 12px; margin: 32px 0 0; font-size: 15px; color: var(--ink); }
+.ar-authors .av { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--rule); background: var(--paper-2); display: grid; place-items: center; font-family: var(--font-mono); font-size: 11px; color: var(--accent); flex: none; }
+.seg-ctl { margin-left: auto; display: inline-flex; border: 1px solid var(--rule); border-radius: 2px; overflow: hidden; }
+.seg-ctl button { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; padding: 6px 10px; background: transparent; color: var(--ink-3); border: 0; cursor: pointer; }
+.seg-ctl button + button { border-left: 1px solid var(--rule); }
+.seg-ctl button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.seg-ctl button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.ar-toc h3 { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-4); font-weight: 500; margin: 0 0 12px; }
+.ar-toc ol { list-style: none; padding: 0; margin: 0; border-left: 2px solid var(--rule); }
+.ar-toc ol ol { border-left: 0; margin: 0 0 2px 14px; }
+.ar-toc li { margin: 0; }
+.ar-toc a { display: block; padding: 5px 0 5px 14px; margin-left: -2px; border-left: 2px solid transparent; font-size: 14px; line-height: 1.4; color: var(--ink-4); }
+.ar-toc ol ol a { font-size: 0.92em; padding-top: 3px; padding-bottom: 3px; }
+.ar-toc a:hover { color: var(--ink-2); }
+.ar-toc a.active { color: var(--ink); border-left-color: var(--ink); }
+
+.ar-main p { font-family: var(--font-serif); font-size: 18px; line-height: 1.75; color: var(--ink-2); margin: 0 0 20px; }
+.ar-main h2 { font-family: var(--font-serif); font-weight: 500; font-size: clamp(24px, 2.4vw, 30px); letter-spacing: -0.015em; line-height: 1.2; margin: 46px 0 16px; padding-top: 20px; border-top: 1px solid var(--rule); }
+.ar-main h2 .num { font-family: var(--font-mono); font-size: 0.55em; color: var(--accent); vertical-align: 0.35em; margin-right: 10px; font-weight: 500; }
+.ar-main h3 { font-family: var(--font-serif); font-weight: 500; font-size: 21px; letter-spacing: -0.01em; margin: 32px 0 12px; }
+.ar-main a { color: var(--ink); border-bottom: 1px solid var(--link-line); padding: 0 1px; transition: color 0.15s, border-color 0.15s; }
+.ar-main a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.ar-main strong { font-weight: 600; color: var(--ink); }
+.ar-main em { font-style: italic; }
+.ar-main pre { background: var(--paper-2); border: 1px solid var(--rule); border-radius: 2px; padding: 16px 18px; margin: 0 0 22px; overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.65; color: var(--ink-2); }
+
+/* TL;DR */
+.tldr { margin: 28px 0 36px; padding: 14px 20px 16px; background: var(--paper-2); border-top: 2px solid var(--ink); }
+.tldr .lbl { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; }
+.tldr .lbl span + span { color: var(--ink-4); }
+.tldr ul { margin: 0; padding-left: 18px; font-family: var(--font-serif); font-size: 17px; line-height: 1.6; color: var(--ink-2); }
+.tldr li { margin: 6px 0; }
+.tldr li::marker { color: var(--accent); }
+.tldr strong { font-weight: 600; color: var(--ink); }
+
+/* route map */
+.viz .btn { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); background: var(--paper); border: 1px solid var(--rule); border-radius: 2px; padding: 6px 10px; cursor: pointer; }
+.viz .btn:hover { color: var(--accent); border-color: var(--accent); }
+.viz .btn.pri { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.route-nar { min-height: 84px; margin-top: 12px; padding: 10px 14px 12px; border-left: 3px solid var(--route-c, var(--ink)); background: var(--paper-2); font-family: var(--font-serif); font-size: 16px; line-height: 1.55; color: var(--ink-2); transition: border-color 0.3s; }
+.route-nar .k { display: flex; justify-content: space-between; gap: 10px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-4); margin-bottom: 3px; }
+.route-nar a { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
+.rt-st { cursor: pointer; }
+.rt-st circle.ring { }
+.rt-st:hover circle.ring, .rt-st.sel circle.ring { r: 9.5; }
+.rt-lab { font-size: 11.5px; fill: var(--ink-4); transition: fill 0.35s; }
+.rt-lab.on { fill: var(--ink); }
+.rt-lab.end { font-weight: 600; }
+.rt-name { font-size: 12.5px; font-weight: 600; fill: var(--ink); cursor: pointer; }
+.rt-name:hover { fill: var(--accent); }
+.rt-halo { transform-box: fill-box; transform-origin: center; animation: rt-pulse 1.3s ease-out infinite; }
+@keyframes rt-pulse { from { transform: scale(1); opacity: 0.45; } to { transform: scale(2.8); opacity: 0; } }
+
+/* chart entrance animations: marks grow / pop / fade when the figure scrolls into view, and replay on view changes */
+.viz .a-bar, .viz .a-col, .viz .a-pop { transform-box: fill-box; }
+.viz .a-bar { transform-origin: left center; }
+.viz .a-bar.neg { transform-origin: right center; }
+.viz .a-col { transform-origin: center bottom; }
+.viz .a-pop { transform-origin: center; }
+.viz .a-draw { stroke-dasharray: 1; }
+.viz.anim:not(.in) .a-bar { transform: scaleX(0); }
+.viz.anim:not(.in) .a-col { transform: scaleY(0); }
+.viz.anim:not(.in) .a-pop { transform: scale(0.2); opacity: 0; }
+.viz.anim:not(.in) .a-fade { opacity: 0; }
+.viz.anim:not(.in) .a-draw { stroke-dashoffset: 1; }
+.viz.anim:not(.in) .tl .bar i { width: 0 !important; }
+.viz.in .a-bar, .viz.in .a-col { transition: transform 0.65s cubic-bezier(0.2, 0.7, 0.2, 1) var(--d, 0ms); }
+.viz.in .a-pop { transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.3, 1.2) var(--d, 0ms), opacity 0.3s ease var(--d, 0ms); }
+.viz.in .a-fade { transition: opacity 0.45s ease var(--d, 0ms); }
+.viz.in .a-draw { stroke-dashoffset: 0; transition: stroke-dashoffset 1.1s cubic-bezier(0.4, 0, 0.2, 1) var(--d, 0ms); }
+.viz.in .tl .bar i { transition: width 0.8s cubic-bezier(0.2, 0.7, 0.2, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .viz.anim:not(.in) .a-bar, .viz.anim:not(.in) .a-col, .viz.anim:not(.in) .a-pop { transform: none; opacity: 1; }
+  .viz.anim:not(.in) .a-fade { opacity: 1; }
+  .viz.anim:not(.in) .a-draw { stroke-dashoffset: 0; }
+  .viz.anim:not(.in) .tl .bar i { width: auto; }
+  .viz.in * { transition: none !important; }
+  .rt-halo { animation: none; opacity: 0; }
+}
+
+/* key findings */
+.ar-findings { list-style: none; padding: 0; margin: 36px 0 8px; counter-reset: f; border-top: 2px solid var(--ink); }
+.ar-findings li { counter-increment: f; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--rule-2); margin: 0; }
+.ar-findings li::before { content: counter(f); font-family: var(--font-mono); font-size: 12px; color: var(--accent); padding-top: 5px; }
+.ar-main .ar-findings a { font-weight: 600; font-size: 17px; line-height: 1.4; color: var(--ink); border: 0; padding: 0; }
+.ar-main .ar-findings a:hover { color: var(--accent); }
+.ar-findings li > div > span { display: block; font-family: var(--font-serif); font-size: 16px; line-height: 1.55; color: var(--ink-3); margin-top: 4px; }
+
+/* lesson callout */
+.lesson { margin: 26px 0 22px; padding: 14px 18px 15px; background: var(--accent-soft); border-left: 2px solid var(--accent); }
+.lesson .lbl { display: block; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; }
+.ar-main .lesson p { margin: 0; font-size: 17px; line-height: 1.65; }
+
+/* outbound links */
+.ar-links { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 24px; }
+.ar-main .ar-links a { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); border: 1px solid var(--rule); border-radius: 2px; padding: 7px 12px; background: var(--paper); }
+.ar-main .ar-links a::after { content: "→"; color: var(--accent); }
+.ar-main .ar-links a:hover { color: var(--accent); border-color: var(--accent); }
+
+/* folds */
+.ar-details.fx-fold { margin: 6px 0 22px; }
+.ar-details summary { font-family: var(--font-serif); font-weight: 500; font-size: 17px; cursor: pointer; color: var(--ink); list-style: none; }
+.ar-details summary::-webkit-details-marker { display: none; }
+.ar-details summary::before { content: "+"; font-family: var(--font-mono); color: var(--accent); margin-right: 10px; }
+.ar-details[open] summary::before { content: "−"; }
+.ar-details ol { margin: 10px 0 0 6px; padding-left: 22px; font-family: var(--font-serif); font-size: 17px; line-height: 1.7; color: var(--ink-2); }
+.ar-details li { margin: 6px 0; }
+
+/* footnotes */
+sup.fn { font-family: var(--font-mono); font-size: 0.6em; color: var(--accent); cursor: help; padding: 0 1px; }
+.fnpop { position: absolute; z-index: 20; max-width: 340px; background: var(--paper); color: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 10px 12px 10px 30px; font-family: var(--font-serif); font-size: 15px; line-height: 1.5; box-shadow: 0 8px 24px -12px rgba(0,0,0,0.35); pointer-events: none; }
+.fnpop::before { content: attr(data-n); position: absolute; left: 12px; top: 11px; font-family: var(--font-mono); font-size: 11px; color: var(--accent); }
+.ar-notes ol { list-style: none; padding: 0; margin: 0; }
+.ar-notes li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--rule-2); font-family: var(--font-serif); font-size: 15px; line-height: 1.55; color: var(--ink-2); }
+.ar-notes li > b { font-family: var(--font-mono); font-weight: 500; font-size: 12px; color: var(--accent); padding-top: 2px; }
+.ar-notes li:target { background: var(--accent-soft); }
+
+/* ---------- pipeline diagram ---------- */
+.ar-diagram { margin: 28px 0 30px; }
+.pipe { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin: 4px 0 0; border-top: 2px solid var(--ink); }
+.pipe > div { padding: 14px 14px 16px 0; position: relative; }
+.pipe > div + div { padding-left: 16px; border-left: 1px solid var(--rule-2); }
+.pipe > div + div::before { content: "→"; position: absolute; left: -8px; top: 12px; background: var(--paper); color: var(--accent); font-family: var(--font-mono); font-size: 13px; line-height: 1; padding: 2px 0; }
+.pipe .k { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.pipe h5 { margin: 4px 0 8px; font-size: 15px; font-weight: 600; color: var(--ink); }
+.pipe ul { margin: 0; padding: 0; list-style: none; font-size: 13.5px; line-height: 1.45; color: var(--ink-3); }
+.pipe li { padding: 3px 0; border-top: 1px dashed var(--rule-2); }
+.pipe li:first-child { border-top: 0; }
+@media (max-width: 640px) { .pipe { grid-template-columns: 1fr 1fr; } .pipe > div:nth-child(3) { border-left: 0; padding-left: 0; } .pipe > div:nth-child(3)::before { display: none; } }
+
+/* ---------- charts ---------- */
+.ar-main figure.viz { position: relative; margin: 36px 0; padding: 0; }
+.viz .vh { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.viz h4 { font-size: 17px; font-weight: 600; line-height: 1.3; margin: 0 0 4px; color: var(--ink); }
+.viz .sub { font-size: 14px; line-height: 1.45; color: var(--ink-3); margin: 0 0 14px; }
+.viz .tgl { flex: none; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); background: var(--paper); border: 1px solid var(--rule); border-radius: 2px; padding: 5px 9px; cursor: pointer; }
+.viz .tgl:hover { color: var(--accent); border-color: var(--accent); }
+.viz .ctrls { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 0 0 12px; }
+.viz .ctrls .seg-ctl { margin-left: 0; }
+.viz .ctrls .cg { display: inline-flex; align-items: center; gap: 8px; }
+.viz .ctrls label { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-4); }
+.viz .legend { display: flex; gap: 6px 16px; flex-wrap: wrap; align-items: center; font-size: 13px; color: var(--ink-2); margin: 0 0 12px; }
+.viz .legend .li { display: inline-flex; align-items: center; gap: 6px; }
+.viz .legend .sw { width: 12px; height: 10px; border-radius: 2px; }
+.viz .legend .dt { width: 10px; height: 10px; border-radius: 50%; }
+.viz .legend .rg { width: 18px; height: 6px; border-radius: 3px; background: var(--cn-soft); border: 1px solid var(--cn); }
+.viz .legend .ho { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--ink-3); }
+.viz svg { width: 100%; height: auto; display: block; overflow: visible; font-family: var(--font-sans); }
+.viz svg text { font-family: var(--font-sans); }
+.viz .tick { fill: var(--ink-4); font-size: 12px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.viz .lab { fill: var(--ink-2); font-size: 13px; }
+.viz .lab-b { fill: var(--ink); font-size: 13px; font-weight: 600; }
+.viz .val { fill: var(--ink-2); font-size: 12px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.viz .val-in { fill: #fff; font-size: 12px; font-weight: 600; font-family: var(--font-mono); }
+.viz .ax-t { fill: var(--ink-3); font-size: 12.5px; }
+.viz .grid { stroke: var(--rule-2); stroke-width: 1; }
+.viz .axis { stroke: var(--rule); stroke-width: 1; }
+.viz .zero { stroke: var(--ink-3); stroke-width: 1; }
+.viz .hit { fill: transparent; cursor: default; }
+.viz .dim { opacity: 0.28; transition: opacity 0.15s; }
+.viz .mk { transition: opacity 0.15s; }
+.viz .tip { position: absolute; pointer-events: none; background: var(--paper); color: var(--ink); border: 1px solid var(--rule); border-radius: 3px; padding: 7px 10px; font-size: 13px; line-height: 1.45; box-shadow: 0 8px 24px -12px rgba(0,0,0,0.35); min-width: 130px; z-index: 5; }
+.viz .tip[hidden] { display: none; }
+.viz .tip .th { font-weight: 600; margin-bottom: 3px; }
+.viz .tip .tr { display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.viz .tip .tr b { font-weight: 600; min-width: 46px; }
+.viz .tip .tr span { color: var(--ink-4); }
+.viz .tip .tr i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.viz table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 6px 0 0; }
+.viz th { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; font-weight: 500; color: var(--ink-3); text-align: left; padding: 8px; border-bottom: 1px solid var(--ink); }
+.viz td { padding: 6px 8px; border-bottom: 1px solid var(--rule-2); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.viz td.n, .viz th.n { text-align: right; }
+.viz .tbl-wrap { overflow-x: auto; }
+.viz .src { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--rule); margin-top: 14px; padding-top: 8px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.05em; color: var(--ink-4); }
+.viz .src b { font-weight: 500; color: var(--ink-3); letter-spacing: 0; }
+.viz figcaption { font-size: 14px; line-height: 1.5; color: var(--ink-3); padding-top: 12px; }
+.viz figcaption b { color: var(--accent); font-weight: 600; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; margin-right: 4px; }
+.viz .stats { display: flex; flex-wrap: wrap; gap: 5px 18px; margin-top: 8px; font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.viz .stats b { font-weight: 600; color: var(--ink); }
+.viz .two { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+.viz .two h6 { margin: 0 0 4px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
+@media (max-width: 640px) { .viz .two { grid-template-columns: 1fr; } .viz .body { overflow-x: auto; -webkit-overflow-scrolling: touch; } .viz .body > svg { min-width: 540px; } }
+
+/* pilot timeline */
+.tl { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-top: 2px solid var(--ink); }
+.tl > div { padding: 12px 12px 14px 0; }
+.tl > div + div { padding-left: 12px; border-left: 1px solid var(--rule-2); }
+.tl .k { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-4); }
+.tl h5 { margin: 3px 0 10px; font-size: 14px; font-weight: 600; line-height: 1.3; color: var(--ink); min-height: 2.6em; }
+.tl .row { margin: 0 0 9px; font-size: 12.5px; color: var(--ink-3); }
+.tl .row .nm { display: flex; justify-content: space-between; gap: 6px; }
+.tl .row .nm b { font-family: var(--font-mono); font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.tl .bar { height: 8px; border-radius: 4px; background: var(--cn-soft); margin-top: 3px; overflow: hidden; display: flex; }
+.tl .bar i { display: block; height: 100%; background: var(--c2); border-radius: 4px 0 0 4px; }
+.tl .bar i.ok { background: var(--c1); }
+.tl .note { font-size: 12.5px; line-height: 1.45; color: var(--ink-3); margin-top: 6px; }
+.tl > div.final { background: var(--c2-soft); padding-left: 12px; padding-right: 12px; }
+@media (max-width: 720px) { .tl { grid-template-columns: 1fr 1fr; } .tl > div:nth-child(odd) { border-left: 0; padding-left: 0; } .tl > div.final { padding-left: 12px; } .tl h5 { min-height: 0; } }
+
+.article-foot { display: flex; justify-content: space-between; margin-top: 28px; font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.07em; text-transform: uppercase; }
+.ar-main .article-foot a { border: 0; color: var(--ink-3); }
+
+@media (max-width: 1000px) {
+  .ar-page { grid-template-columns: minmax(0, 1fr); }
+  .ar-head, .ar-main, .ar-toc { grid-column: 1; }
+  .ar-toc { grid-row: auto; position: static; margin: 24px 0 0; }
+  .ar-toc ol { border: 0; display: flex; flex-wrap: wrap; gap: 0 16px; }
+  .ar-toc ol ol { display: none; }
+  .ar-toc a { padding: 4px 0; border: 0; }
+  .ar-crumb { margin: 24px 0 32px; }
+}
+@media (max-width: 520px) { .ar-main p { font-size: 17px; } }
+@media print { .ar-toc, .seg-ctl, .viz .tgl, .article-foot { display: none !important; } .ar-page { display: block; } }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<main>
+<div class="ar-page">
+
+<div class="ar-head" id="main" tabindex="-1">
+  <div class="ar-crumb"><b><a href="../">EvalResearchBench</a></b><span>›</span><span>When AI Agents Design the Test</span></div>
+  <div class="ar-eyebrow"><time datetime="2026-10-03">Oct 3, 2026</time><span>·</span><span data-readtime>11 min read</span>
+    <div class="seg-ctl" role="group" aria-label="Theme"><button type="button" data-theme-btn="light" aria-pressed="false">Light</button><button type="button" data-theme-btn="dark" aria-pressed="false">Dark</button></div>
+  </div>
+  <h1>When AI Agents Design the Test</h1>
+  <p class="ar-standfirst">Three lessons from EvalResearchBench about the gap between doing research and building a useful evaluation.</p>
+  <div class="ar-authors"><span class="av">ERB</span><span>By the EvalResearchBench team</span></div>
+  <div class="tldr" id="tldr">
+    <div class="lbl"><span>TL;DR</span><span data-readtime>11 min read</span></div>
+    <ul>
+      <li><strong>EvalResearchBench (ERB)</strong> gives an AI agent a deadline and a budget to build a compact, frozen evaluation, then checks that evaluation against 14 established benchmarks on 13 candidate models.</li>
+      <li>The best frozen evaluations order about three in four model pairs the way the targets do, and no researcher leads on every metric.</li>
+      <li><strong>Diagnosis is not repair.</strong> GPT-6 Astra spotted token exhaustion and changed its protocol, yet DeepSeek V4 Flash still gives no answer on 32 of its 40 frozen coding questions.</li>
+      <li><strong>Optimization can hurt.</strong> Grok 4.7 put 94% of its co-work weight on six questions; equal weights on the same answers raise its overall Score from 22.18 to 37.03 on a matched 12-candidate panel.</li>
+      <li><strong>Realism is not signal.</strong> Removing Astra's repository-tracing tasks has a modest effect within the random-deletion range; removing its spreadsheet tasks substantially lowers co-work agreement.</li>
+    </ul>
+  </div>
+</div>
+
+<aside class="ar-toc" aria-label="Contents">
+  <h3>Contents</h3>
+  <ol>
+    <li><a href="#tldr">TL;DR</a></li>
+    <li><a href="#intro">Overview</a>
+      <ol>
+        <li><a href="#f-route">Route map</a></li>
+      </ol></li>
+    <li><a href="#erb">What ERB asks</a>
+      <ol>
+        <li><a href="#metrics">Two metrics</a></li>
+        <li><a href="#leaderboard">The leaderboard</a></li>
+      </ol></li>
+    <li><a href="#lesson-1">1 · Diagnosis is not repair</a></li>
+    <li><a href="#lesson-2">2 · Optimization can hurt</a></li>
+    <li><a href="#lesson-3">3 · Realism is not signal</a></li>
+    <li><a href="#learn">What researchers should learn</a></li>
+    <li><a href="#notes">Notes</a></li>
+    <li><a href="#cite">Citation</a></li>
+  </ol>
+</aside>
+
+<div class="ar-main">
+
+<noscript><p>Interactive charts require JavaScript. The findings below remain readable; <a href="when-ai-agents-design-the-test.data.json">download the chart data</a> for exact values.</p></noscript>
+<section id="intro">
+  <p>AI research needs feedback. A new training recipe, dataset, or agent policy is only an improvement if we can measure what changed. But repeatedly running complex benchmarks is expensive. Human researchers often build smaller evaluations to guide the next experiment. Can an AI agent do that work itself?</p>
+  <p>We built <strong>EvalResearchBench</strong> (ERB) to test this capability. A researcher agent inspects target materials, selects or creates questions, implements graders, and spends a fixed budget on pilot tests. It then freezes an executable evaluation. We run that evaluation on candidate models and compare its measured scores with established benchmarks across coding, co-work, and reasoning.</p>
+  <p>The leaderboard below shows eight completed researcher evaluations, thirteen candidate models, and fourteen targets. A ninth researcher configuration, Fable 5, did not complete assessment and is not ranked here. Each configuration contributes one research episode, so these cases describe particular runs rather than stable traits of the models. The leaderboard is only part of the story. The trajectories show agents making plausible research decisions that do not always improve measurement. Here are three examples.</p>
+
+  <figure class="viz" id="f-route" data-source-href="../traces/"
+    data-title="Route map: three decisions across two research runs"
+    data-sub="A shared workflow, illustrated by Astra’s execution and coverage choices and Grok’s weighting choices."
+    data-src="Researcher trajectories · frozen audits"
+    data-cap="A schematic of three cases from two researcher runs, not three independent experiments or a time-scaled timeline. Stations summarize recorded decisions; ringed endpoints include final assessment and our retrospective analyses. Press Play to animate, click any station for its details, or click a path name to jump to its lesson."></figure>
+  <div class="ar-links"><a href="../">Explore ERB</a></div>
+</section>
+
+<section id="erb">
+  <h2>What ERB asks an evaluation researcher to do</h2>
+  <p>Think of the task as building a compact diagnostic for a much more expensive test battery. The <em>researcher</em> is the agent designing the evaluation; <em>candidates</em> are the models taking it; <em>target benchmarks</em> supply the reference scores. One research episode covers coding, co-work, and reasoning together.</p>
+
+  <figure class="ar-diagram" aria-label="The ERB protocol in four stages">
+    <div class="pipe">
+      <div><span class="k">Inputs</span><h5>What goes in</h5><ul><li>Target descriptions and original questions</li><li>Historical execution traces</li><li>Reference scores for development candidates</li><li>Candidate APIs, execution SDK, submission contract</li></ul></div>
+      <div><span class="k">Research</span><h5>Under a deadline and budgets</h5><ul><li>Select or synthesize questions</li><li>Write graders</li><li>Pilot-test candidates, compare with visible references</li><li>Revise prompts, allowances, weights</li></ul></div>
+      <div><span class="k">Freeze</span><h5>What comes out</h5><ul><li>≥ 100 distinct scored questions</li><li>Graders and fixed aggregation</li><li>One measured score per domain</li><li>Frozen before assessment</li></ul></div>
+      <div><span class="k">Assess</span><h5>Evaluating the evaluator</h5><ul><li>Run on development and withheld candidates</li><li>Compare with visible and withheld references</li><li>Separate budget, no further revision</li></ul></div>
+    </div>
+  </figure>
+
+  <p><strong>What goes in.</strong> The agent receives target descriptions, available original questions and grading resources, historical model execution traces, and reference scores for development candidates. It also gets candidate-model APIs, an execution SDK, and a submission contract. These materials let it study what the targets test and where models succeed or fail.</p>
+  <p><strong>What happens during research.</strong> With three hours, a $100 researcher-inference budget, and a separate $100 shared development/helper-testing budget, the researcher can select existing questions, synthesize new ones, write graders, and test candidates. It sees pilot responses and grades, compares measured scores with visible references, and revises questions, prompts, answer allowances, or weights. ERB leaves the research strategy open. The development objective also matters: Astra’s instructions emphasize Pearson correlation, while Grok’s later run targets pairwise agreement and slope fidelity. The Score reported below is a retrospective CCC-based assessment, not an objective every researcher was asked to optimize.</p>
+  <p><strong>What comes out.</strong> The final submission is an executable evaluation with at least 100 distinct scored questions, graders, and fixed aggregation rules. Running it on a candidate produces one measured score per domain. Questions, grading code, and weights are frozen before independent assessment; scoring uses candidate responses rather than looking up reference answers by model identity.</p>
+  <p><strong>How we evaluate the evaluator.</strong> We run the frozen design on both development and withheld candidates, then compare its domain scores with visible and withheld target references. Withheld candidates test transfer to models outside development; withheld references test agreement with targets whose scores were unavailable as feedback. Final assessment has a separate $120 total cap and a $30 per-candidate cap; it does not feed another round of researcher revision.</p>
+
+<section id="metrics">
+  <h3>Two metrics</h3>
+  <p>We report two complementary metrics. <strong>Score</strong> is 100 times the concordance correlation coefficient<sup class="fn">1</sup>: it rewards agreement in score levels and spread as well as correlation. <strong>Pairwise agreement</strong> (PA) gives a correct candidate ordering 1, a measured tie ½, and a reversal 0; reference ties are excluded. Metrics are computed on each target’s available candidate–reference matches, then averaged equally across targets. Overall therefore weights the six coding, five co-work, and three reasoning targets equally, rather than averaging the three domain columns. A useful design should recover meaningful differences between models within its execution budget.</p>
+</section>
+
+<section id="leaderboard">
+  <h3>The leaderboard</h3>
+  <p>No researcher leads on every view. GPT-6 Astra has the highest overall Score; Grok 4.7 has the highest overall PA, and Kimi K3 is close behind on PA with a much lower Score. Switching to the sealed targets, whose references the researcher never saw, reshuffles the order again. Random120, a human-designed baseline that samples 120 public tasks within fixed source quotas and weights questions equally within each domain, stays competitive. Its panel has 12 complete candidates, so direct comparisons with 13-candidate rows are descriptive; the matched-panel analyses hold candidates fixed.</p>
+
+  <figure class="viz" id="f-board" data-source-href="../data.json"
+    data-title="Frozen evaluations against fourteen targets"
+    data-sub="Each researcher's frozen evaluation, compared with the target references."
+    data-src="Table 1, frozen-score audit"
+    data-cap="Target-equal averages over 6 development and 8 sealed targets. Score is 100 × CCC; PA gives half credit to measured ties and excludes reference ties; 50% is the random-ordering baseline. Eight completed researcher evaluations have domain scores for 13 candidates; Random120 has 12. Each target uses available reference matches, so not every target has all 13 candidates."></figure>
+
+  <figure class="viz" id="f-joint" data-source-href="../data.json"
+    data-title="Score and pairwise agreement disagree on who is best"
+    data-sub="Overall Score against overall PA, one point per frozen evaluation."
+    data-src="Table 1, overall columns"
+    data-cap="The two metrics reward different properties. Astra has the highest overall CCC-based Score; Grok leads overall PA, followed by Kimi K3. These metrics combine agreement across heterogeneous targets. Hover a point for its values."></figure>
+
+  <p>This setup lets us inspect both the frozen evaluation and the decisions that produced it. The following cases show how plausible research choices can break the connection between the two.</p>
+</section>
+</section>
+
+<section id="lesson-1">
+  <h2><span class="num">01</span>An agent can diagnose a failure without finishing the fix</h2>
+  <p>GPT-6 Astra leads the primary leaderboard on overall Score and co-work Score, yet its coding Score is −0.20. That is the quality of the evaluation it designed, not its own ability to solve coding problems. Looking at individual answers reveals a much more specific failure than "the tasks were not good enough."</p>
+
+  <figure class="viz" id="f-outcomes"
+    data-title="The same coding suite: near-ceiling scores or missing answers"
+    data-sub="Outcomes on Astra's 40 frozen coding questions for five selected candidates."
+    data-src="Astra final assessment, item outcomes"
+    data-cap="Full credit, other submitted answers, and no answer partition the questions. These are item counts, not weighted scores or independent requests. “No answer” means an empty saved answer_text field. “Other submitted” includes partially correct and wrong nonempty answers. No-answer outcomes remain in the reported evaluation."></figure>
+
+  <p>Kimi K3 receives full credit on 38 of 40 questions. Gemma 4 31B receives full credit on 34. DeepSeek V4 Flash, by contrast, produces no answer for 32. The suite has little room to distinguish some candidates, while another candidate loses most of its score before a usable answer is available.</p>
+  <p>The frozen results include concrete ranking reversals. On the public SWE-bench Multilingual reference, Flash scores 95.4% and GPT-5.5 scores 77.7%. Astra's coding evaluation gives them 17.97% and 88.93%, respectively. These references use different evaluation protocols<sup class="fn">2</sup>, but the reversal is precisely what ERB asks the compact evaluation to avoid.</p>
+
+  <figure class="viz" id="f-reversal" data-source-href="../traces/run.html?id=gpt-6-astra&amp;tab=results"
+    data-title="A reversal the compact evaluation should avoid"
+    data-sub="Two candidates on the public reference and on Astra's coding evaluation."
+    data-src="SWE-bench Multilingual reference · Astra coding domain"
+    data-cap="The lines cross: the reference puts DeepSeek V4 Flash 17.7 points ahead of GPT-5.5, and Astra's evaluation puts it 71.0 points behind. The two sides use different protocols, so compare orderings, not levels."></figure>
+
+  <p>Astra did notice the execution problem. In the initial single-question pilot, GLM-5.2 exhausted the output allowance on all 32 questions and returned no final answer on 30. Astra responded by putting four questions into one request with a larger shared output allowance. Each question still received its own grade.</p>
+
+  <figure class="viz" id="f-pilots" data-source-href="../traces/run.html?id=gpt-6-astra"
+    data-title="Diagnose, change protocol, observe recurrence"
+    data-sub="Pilot missing-answer counts and the final-protocol coverage audit. The purple coverage bar is not an answer-failure count."
+    data-src="Astra research trajectory"
+    data-cap="A sequence of observed diagnoses and revisions. Pilot counts cover all domains and use different question sets; they are not a controlled comparison of batching strategies. The final count concerns coding only."></figure>
+
+  <p>The first grouped pilot looked encouraging: GPT-5.5 answered all 24 questions, while Flash and GLM each left eight unanswered. But the failure remained. In the next grouped pilot, Flash left 17 of 28 questions unanswered. Astra explicitly noted that failures clustered by request, then tried mixing scientific implementation, software tasks, and repository tracing within groups.</p>
+  <p>Some mixed groups returned complete or partially correct answers. That was evidence of a local improvement, not evidence that the full protocol was fixed. At the final coverage audit, 78 questions had been tested with the final prompt and output allowance; the remaining 34 involved changed grouping, clarified prompts, or untested questions. This did not establish full candidate-by-question coverage under the frozen protocol.</p>
+  <p>In final assessment, 36 of Flash's 40 coding items belonged to requests that hit the token cap. Because four questions shared a request, one exhausted allowance could affect several grades. We have not rerun the same questions under an unbatched protocol, so we cannot conclude that grouping itself increased truncation. What the record establishes is that Astra recognized the failure and retained a protocol in which it remained substantial.</p>
+
+  <details class="ar-details fx-fold">
+    <summary>How much do the capped answers move Astra's scores?</summary>
+    <p style="margin-top:12px">A retrospective sensitivity check reuses the same frozen responses and drops every item whose request ended at the output cap from that candidate's weighted mean. It excludes every item associated with a capped request, including any partially or fully correct answers, then renormalizes the remaining weights separately for each candidate. Coding Score and PA rise, but overall Score falls from 21.35 to 18.35. Because different candidates retain different questions—and as little as 12.5% of original coding weight—this is a selection-sensitive diagnostic, not an estimate of performance with a larger allowance or a repaired protocol. The primary leaderboard retains all completed answers, including empty ones.</p>
+    <figure class="viz" id="f-trunc" data-unnumbered
+      data-title="Astra after excluding items from capped requests"
+      data-sub="Frozen protocol versus a fixed-response sensitivity rule, overall over fourteen targets."
+      data-src="Output-cap sensitivity audit · 12 candidates"
+      data-cap="A fixed panel of 12 candidates with complete domain scores; each target uses its available reference matches. The rule excludes 88 coding, 68 co-work, and 200 reasoning item records, including any nonempty answers in capped requests. These are item counts, not independent requests. Some candidates retain only 12.5% of their original coding weight."></figure>
+  </details>
+
+  <div class="lesson"><span class="lbl">The research lesson</span><p>Explaining a failure and validating a repair are different skills. A useful evaluation researcher must test whether a promising local fix holds across the final suite and candidate panel.</p></div>
+  <div class="ar-links"><a href="../traces/run.html?id=gpt-6-astra">Inspect Astra's trajectory and frozen evaluation</a></div>
+</section>
+
+<section id="lesson-2">
+  <h2><span class="num">02</span>The final optimization can make a good question set worse</h2>
+  <p>Grok 4.7 takes a different route. It groups pilot questions by which development candidates pass, then searches for weights that reproduce visible ordering and score gaps. In co-work, six of twenty questions receive approximately 94% of the scoring weight. Those six are questions that all three candidates tested for this weighting decision pass. ERB exposes four development candidates in total; this search uses three.</p>
+
+  <figure class="viz" id="f-weights" data-source-href="../traces/run.html?id=grok-4-7&amp;tab=benchmark"
+    data-title="Six questions carry almost all of Grok's co-work score"
+    data-sub="Grok's frozen weight on each question, sorted, against equal weights."
+    data-src="Grok frozen evaluation.json"
+    data-cap="Weights are normalized within a domain. The weight-equivalent count, (Σw)² / Σw², describes how concentrated the weights are; it is not a count of statistically independent questions."></figure>
+
+  <p>We can test this decision directly without generating another answer: keep the frozen questions, candidate responses, and item exclusions fixed, and replace Grok's weights with equal item weights.</p>
+
+  <figure class="viz" id="f-reweight"
+    data-title="Same questions. Same answers. Different weights."
+    data-sub="Grok's frozen weights against uniform weights, recomputed on saved grades."
+    data-src="Grok aggregation counterfactual · no new model calls"
+    data-cap="Reweighting Grok on the same twelve-candidate, fourteen-target panel raises overall Score from 22.18 to 37.03, while PA stays essentially unchanged: 76.07% versus 76.01%. “Matched twelve” preserves the same candidate–target matches and infrastructure exclusions in both variants. “Complete ten” restricts to candidates with all 107 item grades. These are within-panel comparisons, not repeated research runs; the caption’s headline numbers refer to the twelve-candidate view."></figure>
+
+  <p>Score is 100 times Lin's concordance correlation coefficient: it measures whether an evaluation matches reference scores in level, spread, and variation. Pairwise agreement asks whether it orders model pairs correctly. Uniform weights improve Score by 14.85 points while leaving ordering almost unchanged. Co-work, where the weight was most concentrated, accounts for the largest change: its Score rises from 25.75 to 50.76 on this matched panel.</p>
+  <p>The questions contained useful measurement signal that the chosen aggregation underused. The result is consistent with weights tailored too closely to the small development panel, although it does not by itself prove that explanation. It does show that an apparently purposeful optimization can reduce the value of an otherwise useful artifact.</p>
+
+  <div class="lesson"><span class="lbl">The research lesson</span><p>Compare the final optimization with a simple baseline. Better agreement on a few development models is not enough to justify concentrating almost all influence in a handful of questions.</p></div>
+  <div class="ar-links"><a href="../traces/run.html?id=grok-4-7&amp;tab=benchmark">Explore Grok's weights, questions, and results</a></div>
+</section>
+
+<section id="lesson-3">
+  <h2><span class="num">03</span>More realistic tasks do not automatically make a better measurement</h2>
+  <p>After inspecting upstream software tasks, Astra identifies a plausible gap: isolated implementation questions may miss repository-level behavior. It adds eight executable, multi-file tracing tasks. One asks candidates to predict cached outputs and recomputation counts after mutating a dependency object in place versus replacing it. The expected outputs come from running the fixture.</p>
+  <p>That is a sensible coverage hypothesis. On the 12-candidate component-analysis panel, removing those eight tasks lowers coding Score by 1.88 points, within the −2.48 to +2.70 range from same-domain, same-size random deletions; PA is unchanged. By contrast, Astra's spreadsheet group contributes strongly to both co-work metrics.</p>
+
+  <figure class="viz" id="f-components"
+    data-title="What each task group contributes"
+    data-sub="Full evaluation minus the evaluation with a task group removed; compared with random removals of the same size."
+    data-src="Native-component audit · 1,000 random deletions per group"
+    data-cap="A fixed 12-candidate panel with target-specific reference matches. Effect = full minus group-deleted domain metric; positive means removal lowers the metric. Remaining weights are renormalized. Gray bands are central 95% ranges from 1,000 same-domain, same-size random deletions, not confidence intervals over research runs. Effects are conditional on the remaining suite and are not additive. Responses are reused; nothing is rerun."></figure>
+
+  <p>The distinction matters. A task can resemble the target workload and still add little information about the differences between candidate models. "We now cover repository reasoning" is a design rationale. "This group improves agreement with the target" is an empirical claim that needs a separate test.</p>
+  <p>The spreadsheet result has its own caveat: 46 of the 96 candidate–item records (eight tasks × twelve candidates) in that group lack a final answer in a request that hit the output cap<sup class="fn">3</sup>, so part of the separation it provides reflects the task under its chosen execution conditions.</p>
+
+  <div class="lesson"><span class="lbl">The research lesson</span><p>Judge additions by their measurement contribution, not only by their difficulty, realism, or novelty. In this run, the more convincing story about coverage was not the same as the stronger contribution to evaluation quality.</p></div>
+</section>
+
+<section id="learn">
+  <h2>What we want evaluation researchers to learn</h2>
+  <p>These examples explain why autonomous evaluation design deserves its own benchmark. Producing questions and graders is only the beginning. A researcher must also distinguish model errors from execution failures, test repairs under the protocol it will actually ship, and check whether selection and weighting decisions improve measurement beyond simple alternatives.</p>
+  <p>This capability matters for recursive self-improvement: an automated research loop needs affordable feedback it can trust. Otherwise it can spend its next experiment improving the wrong thing, or mistake a change in answer completion for a change in capability.</p>
+  <p>ERB makes both the result and the research process inspectable. Browse the leaderboard, open a researcher's trajectory, and follow its decisions through pilot tests, frozen questions, and final assessment. The interesting question is not only who scored highest. It is which research habits produced feedback worth acting on.</p>
+  <div class="ar-links"><a href="../#leaderboard">Leaderboard and research trajectories</a><a href="https://github.com/Mercury7353/self-evaluation-bench">Code and evaluation infrastructure</a></div>
+</section>
+
+<section id="notes" class="ar-notes">
+  <h2>Notes and evidence</h2>
+  <p>These analyses reuse frozen answers; no new model calls were made. Research instructions and harnesses vary across configurations, and CCC was adopted retrospectively. The examples support conclusions about these recorded runs, not a causal ranking of researcher models.</p>
+  <p><a href="when-ai-agents-design-the-test.data.json" download>Download chart data and source hashes</a> · <a href="https://github.com/Mercury7353/self-evaluation-bench/blob/main/website/blog/when-ai-agents-design-the-test.html">Article source</a></p>
+  <p>Evidence: <a href="../traces/run.html?id=gpt-6-astra">Astra’s trajectory</a> (events 182, 266, 306); <a href="../traces/run.html?id=grok-4-7&amp;tab=benchmark">Grok’s frozen questions and weights</a>; <a href="https://github.com/Mercury7353/MyContext/blob/7fe1629/research/2026-10-01-astra-coding-diagnosis/report.html">coding and pilot audit</a>; <a href="https://github.com/Mercury7353/MyContext/blob/7fe1629/experiments/2026-09-25-design-cost-revision/grok-weight-counterfactual.json">reweighting audit</a>.</p>
+  <ol>
+    <li id="fn-1"><b>1</b><span data-fn="1">Lawrence I-Kuei Lin. A concordance correlation coefficient to evaluate reproducibility. <em>Biometrics</em>, 1989. CCC is 1 only when measured and reference scores agree exactly, so it penalizes offsets in level and spread that a plain correlation ignores.</span></li>
+    <li id="fn-2"><b>2</b><span data-fn="2">Reference scores are a fixed, heterogeneous public snapshot, not configuration-matched reruns of every target. Main results describe agreement with that snapshot on the stated candidate panels.</span></li>
+    <li id="fn-3"><b>3</b><span data-fn="3">On the 12-candidate component panel, removing Astra's eight spreadsheet tasks lowers co-work Score by 31.94 points and PA by 12.57 percentage points. The 46 missing answers are item records, not independent requests; four questions share each request.</span></li>
+  </ol>
+</section>
+
+<section id="cite">
+  <h2>Citation</h2>
+  <pre>@misc{erb2026whenaiagents,
+  title        = {When AI Agents Design the Test: Three Lessons from EvalResearchBench},
+  author       = {{EvalResearchBench Team}},
+  year         = {2026},
+  howpublished = {EvalResearchBench blog},
+  url          = {https://mercury7353.github.io/self-evaluation-bench/blog/when-ai-agents-design-the-test.html}
+}</pre>
+  <div class="article-foot"><a href="../">Project home</a><a href="#main">Back to top</a></div>
+</section>
+
+</div><!-- /.ar-main -->
+</div><!-- /.ar-page -->
+</main>
+
+<script type="application/json" id="article-data">{"title":"When AI Agents Design the Test","date":"2026-10-03","new_model_calls":0,"scope":"Frozen-response analyses. Target-specific available reference intersections; no paired repair experiment or repeated research episodes.","sources":[{"file":"astra-truncation-sensitivity.json","sha256":"5f0263feef3db01e23f55e50f81952e475979db4ffc93ee54bdb72b9c84dfb6d"},{"file":"ccc-frozen-component-subsets.json","sha256":"81c0deb1d52ffb4011cdbec2485d50ac2f6b653b81e265f67555054995c097ca"},{"file":"grok-weight-counterfactual.json","sha256":"61edc110fb76ee6e2a78e2efaa9245daf499f56312e2851a0357c2c1abad2e6b"},{"file":"data.json","sha256":"04831a8bf39be9369eb87c7f7db8a9a80f293f151594ed3229beda9313bcb7f5"},{"file":"benchmark.json","sha256":"669523e2f81f8e4fb7bc71d5a64844412a1f9f39ceb2e487b6a7ba8c2f8089eb"},{"file":"figure-data.json","sha256":"97db5a1a3d3107697fe73c67ae0728675cc07d483c33f2f78c473b37fbb85c75"}],"board":[{"n":"GPT-6 Astra","key":"astra","d":{"dev":[[-5.19,40.41,60.64,20.98],[55.71,75.76,83.33,66.99]],"sealed":[[4.79,43.16,24.69,24.15],[60.32,79.47,76.09,71.44]],"all":[[-0.2,42.06,36.67,22.79],[58.01,77.98,78.51,69.54]]}},{"n":"Grok 4.7","key":"grok","d":{"dev":[[24.35,10.34,13.33,17.84],[77.49,72.1,82.22,76.48]],"sealed":[[22.22,37.84,14.48,26.14],[66.85,81.63,71.93,73.66]],"all":[[23.28,26.84,14.1,22.59],[72.17,77.81,75.36,74.87]]}},{"n":"Fable 5.1","key":"fable","d":{"dev":[[9.81,23.52,63.94,23.4],[61.03,69.87,81.11,67.32]],"sealed":[[20.92,19.68,22.6,20.87],[63.94,73.13,67.05,68.16]],"all":[[15.36,21.22,36.38,21.96],[62.48,71.82,71.73,67.8]]}},{"n":"Opus 5","key":"opus","d":{"dev":[[-6.36,24.34,77.99,17.93],[51.26,69.02,80.0,61.97]],"sealed":[[5.75,47.6,18.7,24.68],[56.3,74.61,71.89,67.06]],"all":[[-0.31,38.3,38.46,21.79],[53.78,72.37,74.59,64.88]]}},{"n":"Kimi K3","key":"k3","d":{"dev":[[6.49,12.34,55.33,16.58],[64.33,74.07,81.11,70.38]],"sealed":[[7.93,24.16,28.35,19.12],[70.88,87.07,73.99,77.73]],"all":[[7.21,19.43,37.35,18.03],[67.61,81.87,76.36,74.58]]}},{"n":"GPT-5.6 Sol","key":"sol","d":{"dev":[[21.9,-6.66,50.45,17.14],[66.94,46.38,81.11,62.45]],"sealed":[[17.71,10.24,25.58,16.88],[60.6,60.31,74.54,63.98]],"all":[[19.81,3.48,33.87,16.99],[63.77,54.74,76.73,63.32]]}},{"n":"GLM-5.3","key":"glm","d":{"dev":[[1.86,11.68,50.0,13.15],[56.67,67.51,72.22,62.87]],"sealed":[[8.73,18.3,19.91,15.12],[53.24,77.57,68.18,66.1]],"all":[[5.29,15.65,29.94,14.27],[54.95,73.55,69.53,64.72]]}},{"n":"DeepSeek V4 Pro","key":"ds","d":{"dev":[[3.2,5.55,44.0,10.78],[56.78,64.27,74.44,62.22]],"sealed":[[-0.53,11.59,24.51,10.28],[63.19,65.91,64.18,64.46]],"all":[[1.33,9.17,31.01,10.49],[59.99,65.25,67.6,63.5]]}},{"n":"Random120","key":"r120","base":true,"d":{"dev":[[21.44,-10.71,12.79,9.28],[73.87,55.96,68.06,66.93]],"sealed":[[24.39,13.39,7.15,15.96],[76.63,62.06,69.2,69.31]],"all":[[22.92,3.75,9.03,13.1],[75.25,59.62,68.82,68.29]]}}],"grok_weights":{"coding":[0.034,0.04,0.049,0.049,0.049,0.049,0.049,0.00015,0.00015,0.00015,0.00015,0.034,0.034,0.00015,0.049,0.049,0.049,0.049,0.049,0.00015,0.049,0.00015,0.00015,0.00015,0.00015,0.00015,0.00015,0.049,0.00015,0.00015,0.00015,0.00015,0.049,0.00015,0.00015,0.00015,0.034,0.034,0.049,0.00015,0.049,0.00015,0.00015,0.00015,0.00015,0.00015,0.00015,0.00015,0.00015,0.00015,0.049,0.00015,0.00015,0.00015,0.00015,0.00015,0.00015,0.00015,0.00015,0.00015,0.00015,0.00015],"co-work":[0.011,0.0125,0.15645,0.15645,0.15645,0.15645,0.15645,0.0002,0.0125,0.0002,0.011,0.15645,0.0125,0.0002,0.0002,0.0002,0.0002,0.0002,0.0002,0.0002],"reasoning":[0.073,0.016,0.016,0.004,0.05234117,0.05234117,0.05234117,0.05234117,0.05234118,0.05234118,0.05234118,0.05234118,0.05234118,0.05234118,0.05234118,0.05234118,0.05234118,0.05234118,0.05234118,0.0003,0.0003,0.05234117,0.0003,0.0003,0.05234117]},"grok_reweight":{"m12":[["Coding",22.94,73.9,36.85,73.83],["Co-work",25.75,77.75,50.76,78.76],["Reasoning",14.71,77.62,14.53,75.76],["Overall",22.18,76.07,37.03,76.01]],"c10":[["Coding",18.76,70.88,34.61,75.14],["Co-work",31.65,82.13,51.3,82.14],["Reasoning",11.07,83.36,12.67,83.81],["Overall",21.71,77.57,35.87,79.5]]},"astra_truncation":[["Coding",-2.69,57.14,10.34,75.28],["Co-work",40.05,77.09,21.36,75.21],["Reasoning",38.25,79.63,29.36,76.7],["Overall",21.35,69.08,18.35,75.56]],"components":[["Astra","scientific_code","coding",12,-3.04,-3.54,3.34,-0.06,-1.59,-6.37,3.84,-1.6],["Astra","software_contracts","coding",12,1.45,-3.2,3.18,-0.08,-4.84,-6.37,3.61,-1.65],["Astra","multilingual","coding",8,-0.78,-2.4,2.85,-0.03,-5.71,-5.78,2.48,-1.22],["Astra","codebase_tracing","coding",8,1.88,-2.48,2.7,-0.06,0.0,-5.78,1.94,-1.32],["Astra","gdp_data","co-work",8,31.94,-10.92,16.48,1.47,12.57,-1.84,10.61,3.03],["Astra","workflow_rules","co-work",16,2.93,-14.25,25.9,3.19,3.47,-2.51,13.82,4.77],["Astra","professional_memos","co-work",4,-13.47,-8.13,9.71,0.64,-2.81,-0.99,7.1,1.8],["Astra","carried_context","co-work",4,-1.68,-8.21,8.83,0.68,-0.27,-0.99,7.11,1.79],["Astra","arxiv_math","reasoning",16,-3.04,-2.75,4.86,0.76,-4.14,-4.91,4.77,0.06],["Astra","hle_choice","reasoning",16,2.12,-2.72,5.55,0.79,-0.15,-5.36,5.23,0.01],["Astra","constructed_math","reasoning",8,6.75,-2.15,2.7,0.24,9.37,-3.53,2.3,-0.19],["GLM5.3","implementation","coding",33,-5.12,-14.18,22.61,0.95,2.15,-8.13,16.0,0.83],["GLM5.3","debugging","coding",5,1.46,-3.46,3.3,-0.05,0.73,-7.49,3.92,-0.38],["GLM5.3","instruction_constraints","co-work",20,11.35,-12.59,11.72,0.61,10.34,-3.19,16.45,6.17],["GLM5.3","numeric_deliverables","co-work",10,-5.76,-5.87,6.79,0.22,-2.11,-4.8,7.61,0.66],["GLM5.3","arxiv_math","reasoning",12,-1.92,-5.15,11.37,1.47,-0.76,-3.66,8.9,1.56],["GLM5.3","hle_choice","reasoning",20,27.58,-6.36,22.73,4.48,18.09,-5.2,16.55,3.47],["K3","hle_choice","reasoning",16,8.01,-4.01,11.63,2.26,9.2,-5.06,10.12,1.83],["K3","hle_exact","reasoning",8,-0.78,-3.18,5.37,0.7,0.17,-4.0,5.24,0.4],["K3","arxiv_math","reasoning",8,-2.45,-3.34,5.25,0.64,-4.14,-4.14,5.53,0.39],["K3","base_implementation","coding",15,2.93,-4.26,4.86,0.01,4.9,-4.61,8.34,1.09],["K3","hard_implementation","coding",5,1.78,-2.05,2.95,0.02,-0.82,-3.41,5.18,0.38],["K3","debugging","coding",15,-2.29,-4.62,4.66,-0.07,0.0,-4.45,8.34,1.07],["K3","output_prediction","coding",10,-1.63,-3.4,4.15,0.02,0.0,-4.38,7.44,0.76],["K3","instruction_constraints","co-work",18,13.03,-11.98,12.39,0.44,14.05,3.37,18.59,9.84],["K3","professional_rubrics","co-work",12,-3.58,-7.87,9.06,0.21,5.37,0.5,13.6,6.61]],"astra_outcomes":{"Kimi K3":[38,2,0],"Gemma 4 31B":[34,6,0],"GPT-5.5":[35,1,4],"GLM-5.2":[22,1,17],"DeepSeek V4 Flash":[6,2,32]},"termination":{"coding":88,"co-work":68,"reasoning":200},"remaining_weight":{"coding":{"minimum":0.12500000000000003,"mean":0.8194444444444445,"maximum":1.0},"co-work":{"minimum":0.46875,"mean":0.8125,"maximum":1.0},"reasoning":{"minimum":0.2,"mean":0.5833333333333334,"maximum":1.0}},"component_panel":["development-01","development-06","development-08","holdout-01","holdout-02","holdout-07","holdout-11","sealed-new-01","sealed-new-03","sealed-new-04","sealed-new-05","sealed-new-06"],"component_columns":["researcher","component","domain","questions","score_effect","score_random_low","score_random_high","score_random_mean","pa_effect_pp","pa_random_low_pp","pa_random_high_pp","pa_random_mean_pp"]}</script>
+<script>
+(function () {
+  'use strict';
+  var ARTICLE_DATA = JSON.parse(document.getElementById('article-data').textContent);
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  var root = document.documentElement;
+
+  /* ---------------- theme toggle ---------------- */
+  function isDark() {
+    var t = root.getAttribute('data-theme');
+    if (t) return t === 'dark';
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function syncThemeBtns() {
+    var d = isDark();
+    document.querySelectorAll('[data-theme-btn]').forEach(function (b) { b.setAttribute('aria-pressed', (b.dataset.themeBtn === 'dark') === d ? 'true' : 'false'); });
+  }
+  document.querySelectorAll('[data-theme-btn]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      root.setAttribute('data-theme', b.dataset.themeBtn);
+      try { localStorage.setItem('erb-theme', b.dataset.themeBtn); } catch (e) {}
+      syncThemeBtns();
+    });
+  });
+  syncThemeBtns();
+
+  /* ---------------- helpers ---------------- */
+  function el(tag, attrs, parent) {
+    var ns = (parent && parent.namespaceURI === SVGNS && tag !== 'div') || tag === 'svg';
+    var e = ns ? document.createElementNS(SVGNS, tag) : document.createElement(tag);
+    for (var k in attrs) {
+      if (attrs[k] == null) continue;
+      if (k === 'text') e.textContent = attrs[k]; else e.setAttribute(k, attrs[k]);
+    }
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function f2(v) { return (v < 0 ? '−' : '') + Math.abs(v).toFixed(2); }
+  function f1(v) { return (v < 0 ? '−' : '') + Math.abs(v).toFixed(1); }
+  function scale(d0, d1, r0, r1) { return function (v) { return r0 + (v - d0) / (d1 - d0) * (r1 - r0); }; }
+  function niceTicks(lo, hi, n) {
+    var span = hi - lo, step = Math.pow(10, Math.floor(Math.log10(span / n))), err = span / n / step;
+    if (err >= 7.5) step *= 10; else if (err >= 3.5) step *= 5; else if (err >= 1.5) step *= 2;
+    var out = []; for (var v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(6));
+    return out;
+  }
+
+  /* ---------------- reading time (prose + figures), computed before charts add SVG text ---------------- */
+  (function () {
+    var main = document.querySelector('.ar-main'); if (!main) return;
+    var c = main.cloneNode(true);
+    c.querySelectorAll('pre, #notes, #cite, script, svg').forEach(function (n) { n.remove(); });
+    var words = (c.textContent.match(/\S+/g) || []).length;
+    var figs = main.querySelectorAll('figure.viz').length;
+    var min = Math.max(1, Math.round(words / 230 + figs * 0.3));
+    document.querySelectorAll('[data-readtime]').forEach(function (e) { e.textContent = min + ' min read'; });
+  })();
+
+  var reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var io = ('IntersectionObserver' in window) ? new IntersectionObserver(function (es) {
+    es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, { threshold: 0.2 }) : null;
+
+  var figNo = 0;
+  /* Build the shared chrome for a <figure class="viz">: title, sub, table toggle,
+     optional controls + legend, a body, a hidden table, source row and numbered caption. */
+  function frame(id, opts) {
+    var fig = document.getElementById(id); if (!fig) return null;
+    var numbered = !fig.hasAttribute('data-unnumbered');
+    if (numbered) figNo += 1;
+    var head = el('div', { class: 'vh' }, fig);
+    var tt = el('div', {}, head);
+    el('h4', { text: fig.dataset.title }, tt);
+    if (fig.dataset.sub) el('div', { class: 'sub', text: fig.dataset.sub }, tt);
+    var tgl = el('button', { class: 'tgl', type: 'button', 'aria-pressed': 'false', text: 'Table' }, head);
+    var ctrls = el('div', { class: 'ctrls' }, fig);
+    var legend = el('div', { class: 'legend', role: 'list' }, fig);
+    var body = el('div', { class: 'body', style: 'position:relative' }, fig);
+    var tblWrap = el('div', { class: 'tbl-wrap', hidden: '' }, fig);
+    var stats = el('div', { class: 'stats' }, fig);
+    var src = el('div', { class: 'src' }, fig);
+    el('a', { href: fig.dataset.sourceHref || 'when-ai-agents-design-the-test.data.json', text: 'Source · ' + (fig.dataset.src || 'EvalResearchBench') }, src);
+    el('b', { text: 'EvalResearchBench' }, src);
+    var cap = el('figcaption', {}, fig);
+    if (numbered) el('b', { text: 'Figure ' + figNo + '.' }, cap);
+    cap.appendChild(document.createTextNode(' ' + (fig.dataset.cap || '')));
+    var tp = el('div', { class: 'tip', hidden: '' }, fig);
+    fig.classList.add('anim');
+    if (io && !reduceMotion) io.observe(fig); else fig.classList.add('in');
+    tgl.addEventListener('click', function () {
+      var on = tblWrap.hasAttribute('hidden');
+      if (on) { tblWrap.removeAttribute('hidden'); body.setAttribute('hidden', ''); } else { tblWrap.setAttribute('hidden', ''); body.removeAttribute('hidden'); }
+      tgl.textContent = on ? 'Chart' : 'Table';
+      tgl.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    return {
+      fig: fig, ctrls: ctrls, legend: legend, body: body, stats: stats, tip: tp,
+      replay: function () {
+        if (!fig.classList.contains('in') || reduceMotion) return;
+        fig.classList.remove('in'); fig.getBoundingClientRect();
+        requestAnimationFrame(function () { requestAnimationFrame(function () { fig.classList.add('in'); }); });
+      },
+      table: function (headers, rows) {
+        tblWrap.innerHTML = '';
+        var tb = el('table', {}, tblWrap), tr = el('tr', {}, el('thead', {}, tb));
+        var num = function (c) { return /^[−+\-]?[\d.,]+%?$|…/.test(String(c)); };
+        var isNum = headers.map(function (h, i) { return i > 0 && rows.length && num(rows[0][i]); });
+        headers.forEach(function (h, i) { el('th', { class: isNum[i] ? 'n' : '', text: h }, tr); });
+        var tbody = el('tbody', {}, tb);
+        rows.forEach(function (r) { var t = el('tr', {}, tbody); r.forEach(function (c, i) { el('td', { class: isNum[i] ? 'n' : '', text: c }, t); }); });
+      },
+      legendSet: function (items) {
+        legend.innerHTML = '';
+        if (!items || !items.length) { legend.style.display = 'none'; return; }
+        legend.style.display = '';
+        items.forEach(function (L) {
+          var li = el('span', { class: 'li', role: 'listitem' }, legend);
+          var k = el('span', { class: L.kind || 'sw' }, li);
+          if (L.color) k.style.background = L.color;
+          if (L.border) k.style.borderColor = L.border;
+          el('span', { text: L.label }, li);
+        });
+      },
+      seg: function (label, options, value, onChange) {
+        var grp = el('span', { class: 'cg' }, ctrls);
+        if (label) el('label', { text: label }, grp);
+        var g = el('div', { class: 'seg-ctl', role: 'group', 'aria-label': label || 'View' }, grp);
+        options.forEach(function (o) {
+          var b = el('button', { type: 'button', 'aria-pressed': o[0] === value ? 'true' : 'false', text: o[1] }, g);
+          b.addEventListener('click', function () {
+            g.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', 'false'); });
+            b.setAttribute('aria-pressed', 'true'); onChange(o[0]);
+          });
+        });
+      }
+    };
+  }
+  function showTip(F, evt, title, rows) {
+    var tp = F.tip; tp.innerHTML = '';
+    el('div', { class: 'th', text: title }, tp);
+    rows.forEach(function (r) {
+      var tr = el('div', { class: 'tr' }, tp);
+      if (r.color) { var i = el('i', {}, tr); i.style.background = r.color; }
+      el('b', { text: r.v }, tr); el('span', { text: r.label }, tr);
+    });
+    tp.removeAttribute('hidden');
+    var rect = F.fig.getBoundingClientRect();
+    var x = evt.clientX - rect.left + 14, y = evt.clientY - rect.top + 14;
+    if (x + tp.offsetWidth > rect.width - 4) x = evt.clientX - rect.left - tp.offsetWidth - 14;
+    if (x < 0) x = 4;
+    tp.style.left = x + 'px'; tp.style.top = y + 'px';
+  }
+  function hideTip(F) { F.tip.setAttribute('hidden', ''); }
+  function svgBox(F, w, h, label) {
+    F.body.innerHTML = '';
+    return el('svg', { viewBox: '0 0 ' + w + ' ' + h, role: 'img', 'aria-label': label }, F.body);
+  }
+
+  /* ================================================================
+     DATA (from the paper's frozen audits; no new model calls)
+     ================================================================ */
+  // [coding, co-work, reasoning, avg] per split, Score (100×CCC) then PA (%)
+  var BOARD = ARTICLE_DATA.board;
+  var DOMS = ['Coding', 'Co-work', 'Reasoning', 'Average'];
+  var SPLITS = { dev: 'Development', sealed: 'Sealed', all: 'Overall' };
+
+  /* ---------------- Figure: animated route map of three research paths ---------------- */
+  (function () {
+    var F = frame('f-route'); if (!F) return;
+    var X0 = 40, TY = 70, JX = 262, XE = 640, SLOPE = 0.35;
+    var TRUNK = { id: 't', name: 'Shared research loop', color: 'var(--ink)', pts: [[X0, TY], [JX, TY]], st: [
+      [60, 'Target|materials', 'The researcher receives target descriptions, original questions, execution traces, and reference scores for development candidates.'],
+      [150, 'Pilot|tests', 'It spends a fixed budget testing candidate models and compares measured scores with the visible references.'],
+      [240, 'Revise', 'It revises questions, prompts, answer allowances, and weights. From here, three decisions across Astra and Grok take different paths. Their development objectives were not identical.']
+    ] };
+    var LANES = [
+      { id: 'a', name: 'Astra · execution', color: 'var(--c2)', y: 150, href: '#lesson-1', lesson: 'Lesson 1', st: [
+        [400, 'Diagnose token|exhaustion', 'Single-question pilot: GLM-5.2 hits the output cap on all 32 questions and gives no final answer on 30. Astra names the cause.'],
+        [480, '4 questions|per request', 'Astra batches four questions per request with a larger shared allowance. First grouped pilot: GPT-5.5 answers 24 of 24; Flash and GLM still miss 8.'],
+        [560, 'Failures|recur', 'Next grouped pilot: Flash misses 17 of 28, clustered by request. Astra mixes task types, but the coverage audit records 34 of 112 questions as changed or untested under the final protocol.'],
+        [640, 'No answer on|32 of 40', 'Frozen coding suite: DeepSeek V4 Flash gives no answer on 32 of 40 questions, and Astra’s coding Score ends at −0.20.', true]
+      ] },
+      { id: 'b', name: 'Grok · weighting', color: 'var(--c1)', y: 250, href: '#lesson-2', lesson: 'Lesson 2', st: [
+        [400, 'Group items by|who passes', 'Grok groups its pilot questions by which of three development candidates pass them.'],
+        [480, 'Fit weights to|dev ordering', 'It searches for weights that reproduce the visible ordering and score gaps of those few candidates.'],
+        [560, '6 items get|94% of co-work', 'Six co-work questions that all three candidates pass end up with 93.9% of the co-work weight.'],
+        [640, 'Score 22.18 →|37.03 uniform', 'On the same 12-candidate panel, frozen overall Score is 22.18. Equal weights on the same saved answers give 37.03, with pairwise agreement almost unchanged.', true]
+      ] },
+      { id: 'c', name: 'Astra · coverage', color: 'var(--c3)', y: 350, href: '#lesson-3', lesson: 'Lesson 3', st: [
+        [400, 'Spot a repo-|level gap', 'After reading upstream software tasks, Astra suspects that isolated questions miss repository-level behavior.'],
+        [480, 'Add 8 tracing|tasks', 'It adds eight executable multi-file tracing tasks whose expected outputs come from running the fixture.'],
+        [560, 'Remove and|recompute', 'We delete that group and recompute Score and PA on the fixed panel, against 1,000 same-size random deletions.'],
+        [640, 'Inside random|range; PA flat', 'The effect stays inside the random range and PA does not move. The spreadsheet group, by contrast, adds 31.94 co-work Score points.', true]
+      ] }
+    ];
+    LANES.forEach(function (l, i) { var off = (1 - i) * 9, xt = JX + (l.y - TY) * SLOPE + off; l.pts = [[JX + off, TY], [xt, l.y], [XE, l.y]]; });
+    var ROUTES = [TRUNK].concat(LANES);
+
+    // geometry: cumulative lengths along a polyline
+    ROUTES.forEach(function (R) {
+      R.cum = [0];
+      for (var i = 1; i < R.pts.length; i++) R.cum.push(R.cum[i - 1] + Math.hypot(R.pts[i][0] - R.pts[i - 1][0], R.pts[i][1] - R.pts[i - 1][1]));
+      R.L = R.cum[R.cum.length - 1];
+      R.stLen = R.st.map(function (s) {
+        // station sits on the last (horizontal) segment
+        var k = R.pts.length - 1, a = R.pts[k - 1];
+        return R.cum[k - 1] + (s[0] - a[0]);
+      });
+    });
+    function pointAt(R, len) {
+      len = Math.max(0, Math.min(R.L, len));
+      for (var i = 1; i < R.pts.length; i++) {
+        if (len <= R.cum[i] || i === R.pts.length - 1) {
+          var t = (len - R.cum[i - 1]) / ((R.cum[i] - R.cum[i - 1]) || 1), a = R.pts[i - 1], b = R.pts[i];
+          return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        }
+      }
+    }
+    function dPath(R) { return R.pts.map(function (p, i) { return (i ? 'L' : 'M') + p[0] + ',' + p[1]; }).join(' '); }
+
+    F.legendSet(ROUTES.map(function (R) { return { color: R.color, label: R.name }; }));
+    var playBtn = el('button', { type: 'button', class: 'btn pri', text: '▶ Play' }, F.ctrls);
+    var allBtn = el('button', { type: 'button', class: 'btn', text: 'Show all' }, F.ctrls);
+    var laneBtns = el('span', { class: 'cg' }, F.ctrls);
+    el('label', { text: 'Replay a path' }, laneBtns);
+    var lg = el('div', { class: 'seg-ctl', role: 'group', 'aria-label': 'Replay a path' }, laneBtns);
+    LANES.forEach(function (l, i) {
+      var b = el('button', { type: 'button', 'aria-pressed': 'false', text: ['Execution', 'Weighting', 'Coverage'][i] }, lg);
+      b.addEventListener('click', function () { play(l); });
+    });
+
+    var W = 760, H = 410;
+    var svg = svgBox(F, W, H, 'Route map of three research paths');
+    var gGhost = el('g', {}, svg), gLive = el('g', {}, svg), gSt = el('g', {}, svg), gTrain = el('g', { opacity: 0 }, svg);
+    var nar = el('div', { class: 'route-nar', 'aria-live': 'polite' }, F.body);
+
+    ROUTES.forEach(function (R) {
+      el('path', { d: dPath(R), fill: 'none', stroke: 'var(--rule)', 'stroke-width': 6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, gGhost);
+      R.live = el('path', { d: dPath(R), fill: 'none', stroke: R.color, 'stroke-width': 6, 'stroke-linecap': 'butt', 'stroke-linejoin': 'round', 'stroke-dasharray': R.L + ' ' + (R.L + 40) }, gLive);
+      R.nodes = [];
+      R.st.forEach(function (s, i) {
+        var lane = R !== TRUNK, end = !!s[3], y = lane ? R.y : TY;
+        var g = el('g', { class: 'rt-st', tabindex: '0', role: 'button', 'aria-label': s[1].replace('|', ' ') }, gSt);
+        var ring = el('circle', { class: 'ring', cx: s[0], cy: y, r: end ? 9 : 7, fill: 'var(--paper)', stroke: 'var(--rule)', 'stroke-width': end ? 3.5 : 3 }, g);
+        var core = end ? el('circle', { cx: s[0], cy: y, r: 4, fill: R.color, opacity: 0 }, g) : null;
+        var lines = s[1].split('|'), above = !lane || i % 2 === 0;
+        var t = el('text', { x: s[0], 'text-anchor': 'middle', class: 'rt-lab' + (end ? ' end' : '') }, g);
+        lines.forEach(function (ln, k) {
+          var yy = above ? y - 16 - (lines.length - 1 - k) * 14 : y + 26 + k * 14;
+          el('tspan', { x: s[0], y: yy, text: ln }, t);
+        });
+        el('circle', { cx: s[0], cy: y, r: 22, fill: 'transparent' }, g);
+        function pick() { stop(); select(R, i); }
+        g.addEventListener('click', pick);
+        g.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+        R.nodes.push({ g: g, ring: ring, core: core, lab: t });
+      });
+      if (R !== TRUNK) {
+        el('line', { x1: X0, x2: X0 + 18, y1: R.y, y2: R.y, stroke: R.color, 'stroke-width': 6, 'stroke-linecap': 'round' }, gSt);
+        var nm = el('text', { x: X0 + 28, y: R.y + 4.5, class: 'rt-name', text: R.name }, gSt);
+        el('text', { x: X0 + 28, y: R.y + 20, class: 'tick', 'font-size': 10.5, text: R.lesson + ' →' }, gSt);
+        nm.addEventListener('click', function () { var t = document.querySelector(R.href); if (t) t.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' }); });
+      }
+    });
+    el('rect', { x: JX - 19, y: TY - 9, width: 38, height: 18, rx: 9, fill: 'var(--paper)', stroke: 'var(--ink)', 'stroke-width': 3.5 }, gSt);
+    el('text', { x: JX + 26, y: TY + 4, class: 'tick', 'font-size': 10.5, text: 'paths diverge' }, gSt);
+    el('text', { x: XE, y: 22, 'text-anchor': 'middle', class: 'tick', 'font-size': 10.5, text: 'FROZEN RESULT' }, gSt);
+    el('line', { x1: XE, x2: XE, y1: 30, y2: H - 12, stroke: 'var(--rule)', 'stroke-dasharray': '2 4' }, gGhost);
+    var halo = el('circle', { cx: 0, cy: 0, r: 7, class: 'rt-halo' }, gTrain);
+    var dot = el('circle', { cx: 0, cy: 0, r: 7, stroke: 'var(--paper)', 'stroke-width': 2.5 }, gTrain);
+
+    function setDrawn(R, len) {
+      R.drawn = len;
+      R.live.setAttribute('stroke-dashoffset', R.L - len);
+      R.stLen.forEach(function (sl, i) {
+        var on = len >= sl - 0.5, n = R.nodes[i];
+        n.ring.style.stroke = on ? R.color : '';
+        n.lab.classList.toggle('on', on);
+        if (n.core) n.core.setAttribute('opacity', on ? 1 : 0);
+      });
+    }
+    function moveTrain(R, len) {
+      var p = pointAt(R, len);
+      [halo, dot].forEach(function (c) { c.setAttribute('cx', p[0]); c.setAttribute('cy', p[1]); c.setAttribute('fill', R.color); });
+      gTrain.setAttribute('opacity', 1);
+    }
+    function sel(R, i) {
+      ROUTES.forEach(function (Q) { Q.nodes.forEach(function (n, j) { n.g.classList.toggle('sel', Q === R && j === i); }); });
+    }
+    function say(kicker, text, color, link) {
+      nar.style.setProperty('--route-c', color || 'var(--ink)');
+      nar.innerHTML = '';
+      var k = el('span', { class: 'k' }, nar);
+      el('span', { text: kicker }, k);
+      if (link) { var a = el('a', { href: link[0], text: link[1] + ' →' }, k); a.style.borderBottom = '0'; }
+      nar.appendChild(document.createTextNode(text));
+    }
+    function select(R, i) {
+      sel(R, i);
+      var s = R.st[i];
+      say(R.name + ' · ' + s[1].replace('|', ' ').replace('- ', '-'), s[2], R.color, R.href ? [R.href, R.lesson] : null);
+    }
+    var token = 0;
+    function stop() { token++; gTrain.setAttribute('opacity', 0); playBtn.textContent = '▶ Replay'; }
+    function showAll() {
+      stop();
+      ROUTES.forEach(function (R) { setDrawn(R, R.L); });
+      sel(null, -1);
+      say('Route map', 'Each path starts from the same research loop and ends at what the frozen evaluation actually measured. Click any station for details, or a path name to jump to its lesson.');
+    }
+    function play(only) {
+      var my = ++token, steps = [];
+      if (only) { setDrawn(TRUNK, TRUNK.L); setDrawn(only, 0); }
+      else ROUTES.forEach(function (R) { setDrawn(R, 0); });
+      (only ? [only] : ROUTES).forEach(function (R) { R.stLen.forEach(function (sl, i) { steps.push({ R: R, i: i, len: sl }); }); });
+      if (only) steps.push({ R: only, i: -1, len: only.L });
+      else LANES.forEach(function (R) { steps.push({ R: R, i: -1, len: R.L, fast: true }); });
+      playBtn.textContent = '❚❚ Pause';
+      var k = 0;
+      function next() {
+        if (my !== token) return;
+        if (k >= steps.length) { stop(); sel(null, -1); playBtn.textContent = '▶ Replay'; if (!only) showAll(); return; }
+        var s = steps[k++], R = s.R, from = R.drawn, to = s.len;
+        if (from > to) from = 0;
+        var dur = Math.max(260, (to - from) / 0.15), t0 = null;
+        function tick(ts) {
+          if (my !== token) return;
+          if (t0 == null) t0 = ts;
+          var p = Math.min(1, (ts - t0) / dur), e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+          var len = from + (to - from) * e;
+          setDrawn(R, len); moveTrain(R, len);
+          if (p < 1) requestAnimationFrame(tick);
+          else if (s.i >= 0) { select(R, s.i); setTimeout(next, R.st[s.i][3] ? 2600 : 1900); }
+          else next();
+        }
+        requestAnimationFrame(tick);
+      }
+      next();
+    }
+    playBtn.addEventListener('click', function () {
+      if (/Pause/.test(playBtn.textContent)) { stop(); return; }
+      lg.querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); });
+      play(null);
+    });
+    allBtn.addEventListener('click', showAll);
+    lg.querySelectorAll('button').forEach(function (b) { b.addEventListener('click', function () { lg.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); }); }); });
+
+    ROUTES.forEach(function (R) { setDrawn(R, 0); });
+    say('Route map', 'Press Play to follow three research paths from the same starting loop to their frozen results, or click any station.');
+    if (reduceMotion || !('IntersectionObserver' in window)) { showAll(); playBtn.textContent = '▶ Play'; }
+    else {
+      var seen = new IntersectionObserver(function (es) {
+        es.forEach(function (e) { if (e.isIntersecting) { seen.disconnect(); setTimeout(function () { if (token === 0) play(null); }, 400); } });
+      }, { threshold: 0.45 });
+      seen.observe(F.fig);
+    }
+    F.table(['Path', 'Station', 'What happened'], ROUTES.reduce(function (acc, R) {
+      return acc.concat(R.st.map(function (s) { return [R.name, s[1].replace('|', ' ').replace('- ', '-'), s[2]]; }));
+    }, []));
+  })();
+
+  /* ---------------- Figure: leaderboard (lollipop) ---------------- */
+  (function () {
+    var F = frame('f-board'); if (!F) return;
+    var st = { m: 1, s: 'all', d: 3 };
+    F.seg('Metric', [[1, 'PA'], [0, 'Score']], st.m, function (v) { st.m = v; draw(); });
+    F.seg('Targets', [['dev', 'Dev'], ['sealed', 'Sealed'], ['all', 'Overall']], st.s, function (v) { st.s = v; draw(); });
+    F.seg('Domain', [[3, 'Avg'], [0, 'Coding'], [1, 'Co-work'], [2, 'Reasoning']], st.d, function (v) { st.d = v; draw(); });
+    F.legendSet([{ kind: 'dt', color: 'var(--c1)', label: 'Researcher evaluation' }, { kind: 'dt', color: 'var(--c2)', label: 'Leader in this view' }, { kind: 'ho', border: 'var(--ink-3)', label: 'Random120 (human baseline)' }]);
+    function draw() {
+      var rows = BOARD.map(function (r) { return { r: r, v: r.d[st.s][st.m][st.d] }; });
+      rows.sort(function (a, b) { return b.v - a.v; });
+      var bestV = Math.max.apply(null, rows.filter(function (x) { return !x.r.base; }).map(function (x) { return x.v; }));
+      var W = 680, L = 132, R = 56, T = 8, rowH = 30, H = T + rows.length * rowH + 34;
+      var isPA = st.m === 1;
+      var base = isPA ? 50 : 0;
+      var lo = isPA ? 40 : Math.min(-20, Math.floor(Math.min.apply(null, rows.map(function (x) { return x.v; })) / 10) * 10);
+      var hi = isPA ? 100 : Math.max(50, Math.ceil(Math.max.apply(null, rows.map(function (x) { return x.v; })) / 10) * 10);
+      var x = scale(lo, hi, L, W - R);
+      var svg = svgBox(F, W, H, 'Leaderboard of frozen evaluations');
+      niceTicks(lo, hi, 6).forEach(function (t) {
+        el('line', { x1: x(t), x2: x(t), y1: T, y2: H - 28, class: 'grid' }, svg);
+        el('text', { x: x(t), y: H - 12, 'text-anchor': 'middle', class: 'tick', text: isPA ? t + '%' : t }, svg);
+      });
+      el('line', { x1: x(base), x2: x(base), y1: T - 4, y2: H - 28, class: 'zero' }, svg);
+      el('text', { x: x(base) + 4, y: T + 2, class: 'tick', 'font-size': 10.5, text: isPA ? 'chance' : '' }, svg);
+      rows.forEach(function (it, i) {
+        var y = T + i * rowH + rowH / 2, r = it.r, lead = !r.base && it.v === bestV;
+        var col = r.base ? 'var(--ink-3)' : (lead ? 'var(--c2)' : 'var(--c1)');
+        var g = el('g', { class: 'mk' }, svg);
+        if (i % 2 === 0) el('rect', { x: 0, y: y - rowH / 2, width: W, height: rowH, fill: 'var(--paper-2)', opacity: 0.55 }, g);
+        el('text', { x: L - 12, y: y + 4.5, 'text-anchor': 'end', class: lead ? 'lab-b' : 'lab', text: r.n }, g);
+        el('line', { x1: x(base), x2: x(it.v), y1: y, y2: y, stroke: col, 'stroke-width': 2, 'stroke-linecap': 'round', opacity: r.base ? 0.6 : 1, class: 'a-bar' + (it.v < base ? ' neg' : ''), style: '--d:' + i * 45 + 'ms' }, g);
+        var dd = '--d:' + (i * 45 + 320) + 'ms';
+        if (r.base) el('circle', { cx: x(it.v), cy: y, r: 5.5, fill: 'var(--paper)', stroke: col, 'stroke-width': 2, class: 'a-pop', style: dd }, g);
+        else el('circle', { cx: x(it.v), cy: y, r: 6, fill: col, stroke: 'var(--paper)', 'stroke-width': 2, class: 'a-pop', style: dd }, g);
+        var right = it.v >= base;
+        el('text', { x: x(it.v) + (right ? 11 : -11), y: y + 4, 'text-anchor': right ? 'start' : 'end', class: 'val a-fade', style: '--d:' + (i * 45 + 480) + 'ms', text: f2(it.v) + (isPA ? '%' : '') }, g);
+        var hit = el('rect', { x: 0, y: y - rowH / 2, width: W, height: rowH, class: 'hit' }, g);
+        hit.addEventListener('mousemove', function (e) {
+          var d = r.d[st.s];
+          showTip(F, e, r.n + ' · ' + SPLITS[st.s], DOMS.map(function (nm, j) { return { v: f2(d[st.m][j]) + (isPA ? '%' : ''), label: nm }; }));
+        });
+        hit.addEventListener('mouseleave', function () { hideTip(F); });
+      });
+      F.table(['Evaluator', 'Coding', 'Co-work', 'Reasoning', 'Average'], rows.map(function (it) {
+        return [it.r.n].concat(it.r.d[st.s][st.m].map(function (v) { return f2(v); }));
+      }));
+      F.stats.innerHTML = '<span>' + (isPA ? 'PA' : 'Score') + ' · ' + SPLITS[st.s] + ' · ' + DOMS[st.d] + '</span><span>leader <b>' + rows.filter(function (x) { return !x.r.base && x.v === bestV; })[0].r.n + '</b></span>';
+      F.replay();
+    }
+    draw();
+  })();
+
+  /* ---------------- Figure: Score vs PA scatter ---------------- */
+  (function () {
+    var F = frame('f-joint'); if (!F) return;
+    F.ctrls.style.display = 'none';
+    F.legendSet([{ kind: 'dt', color: 'var(--c1)', label: 'Highest Score' }, { kind: 'dt', color: 'var(--c2)', label: 'Highest PA' }, { kind: 'dt', color: 'var(--cn)', label: 'Other researchers' }, { kind: 'ho', border: 'var(--ink-3)', label: 'Random120' }]);
+    var W = 680, H = 360, L = 52, R = 24, T = 14, B = 46;
+    var x = scale(8, 26, L, W - R), y = scale(60, 78, H - B, T);
+    var svg = svgBox(F, W, H, 'Overall Score against overall PA');
+    niceTicks(8, 26, 8).forEach(function (t) { el('line', { x1: x(t), x2: x(t), y1: T, y2: H - B, class: 'grid' }, svg); el('text', { x: x(t), y: H - B + 18, 'text-anchor': 'middle', class: 'tick', text: t }, svg); });
+    niceTicks(60, 78, 6).forEach(function (t) { el('line', { x1: L, x2: W - R, y1: y(t), y2: y(t), class: 'grid' }, svg); el('text', { x: L - 8, y: y(t) + 4, 'text-anchor': 'end', class: 'tick', text: t + '%' }, svg); });
+    el('text', { x: (L + W - R) / 2, y: H - 6, 'text-anchor': 'middle', class: 'ax-t', text: 'Overall Score (100 × CCC) →' }, svg);
+    el('text', { x: 14, y: (T + H - B) / 2, 'text-anchor': 'middle', class: 'ax-t', transform: 'rotate(-90 14 ' + (T + H - B) / 2 + ')', text: 'Overall PA →' }, svg);
+    var labelPos = { astra: [10, 4, 'start'], grok: [10, 4, 'start'], fable: [10, 12, 'start'], opus: [10, 4, 'start'], k3: [-10, 4, 'end'], sol: [10, 4, 'start'], glm: [-10, -6, 'end'], ds: [10, 4, 'start'], r120: [10, 4, 'start'] };
+    var marks = [];
+    BOARD.forEach(function (r, ri) {
+      var sx = r.d.all[0][3], py = r.d.all[1][3];
+      var col = r.key === 'astra' ? 'var(--c1)' : (r.key === 'grok' ? 'var(--c2)' : 'var(--cn)');
+      var g = el('g', { class: 'mk' }, svg);
+      var dd = '--d:' + ri * 70 + 'ms';
+      if (r.base) el('circle', { cx: x(sx), cy: y(py), r: 6, fill: 'var(--paper)', stroke: 'var(--ink-3)', 'stroke-width': 2, class: 'a-pop', style: dd }, g);
+      else el('circle', { cx: x(sx), cy: y(py), r: 7, fill: col, stroke: 'var(--paper)', 'stroke-width': 2, class: 'a-pop', style: dd }, g);
+      var lp = labelPos[r.key];
+      el('text', { x: x(sx) + lp[0], y: y(py) + lp[1], 'text-anchor': lp[2], class: (r.key === 'astra' || r.key === 'grok') ? 'lab-b' : 'lab', text: r.n }, g);
+      var hit = el('circle', { cx: x(sx), cy: y(py), r: 16, class: 'hit' }, g);
+      hit.addEventListener('mousemove', function (e) {
+        marks.forEach(function (m) { m.classList.toggle('dim', m !== g); });
+        showTip(F, e, r.n, [{ v: f2(sx), label: 'Score' }, { v: f2(py) + '%', label: 'PA' }]);
+      });
+      hit.addEventListener('mouseleave', function () { marks.forEach(function (m) { m.classList.remove('dim'); }); hideTip(F); });
+      marks.push(g);
+    });
+    F.table(['Evaluator', 'Overall Score', 'Overall PA (%)'], BOARD.map(function (r) { return [r.n, f2(r.d.all[0][3]), f2(r.d.all[1][3])]; }));
+  })();
+
+  /* ---------------- Figure: Astra coding outcomes (stacked bars) ---------------- */
+  (function () {
+    var F = frame('f-outcomes'); if (!F) return;
+    F.ctrls.style.display = 'none';
+    var CATS = [['Full credit', 'var(--c1)'], ['Other submitted answer', 'var(--cn)'], ['No answer', 'var(--c2)']];
+    F.legendSet(CATS.map(function (c) { return { color: c[1], label: c[0] }; }));
+    var D = [['Kimi K3', 38, 2, 0], ['Gemma 4 31B', 34, 6, 0], ['GPT-5.5', 35, 1, 4], ['GLM-5.2', 22, 1, 17], ['DeepSeek V4 Flash', 6, 2, 32]];
+    var W = 680, L = 136, R = 12, T = 6, rowH = 44, bh = 26, H = T + D.length * rowH + 34;
+    var x = scale(0, 40, L, W - R);
+    var svg = svgBox(F, W, H, 'Coding outcomes per candidate');
+    [0, 10, 20, 30, 40].forEach(function (t) { el('line', { x1: x(t), x2: x(t), y1: T, y2: H - 30, class: 'grid' }, svg); el('text', { x: x(t), y: H - 12, 'text-anchor': 'middle', class: 'tick', text: t }, svg); });
+    var groups = [];
+    D.forEach(function (d, i) {
+      var y = T + i * rowH + (rowH - bh) / 2, acc = 0;
+      var g = el('g', { class: 'mk' }, svg); groups.push(g);
+      el('text', { x: L - 12, y: y + bh / 2 + 4.5, 'text-anchor': 'end', class: 'lab', text: d[0] }, g);
+      [1, 2, 3].forEach(function (k) {
+        var v = d[k]; if (!v) return;
+        var x0 = x(acc) + (acc ? 1 : 0), x1 = x(acc + v) - (acc + v < 40 ? 1 : 0);
+        el('rect', { x: x0, y: y, width: Math.max(1, x1 - x0), height: bh, rx: 2, fill: CATS[k - 1][1], class: 'a-bar', style: '--d:' + (i * 90 + (k - 1) * 160) + 'ms' }, g);
+        if (v >= 3 && k !== 2) el('text', { x: (x0 + x1) / 2, y: y + bh / 2 + 4, 'text-anchor': 'middle', class: 'val-in a-fade', style: '--d:' + (i * 90 + 560) + 'ms', text: v }, g);
+        acc += v;
+      });
+      var hit = el('rect', { x: 0, y: y - 6, width: W, height: bh + 12, class: 'hit' }, g);
+      hit.addEventListener('mousemove', function (e) {
+        groups.forEach(function (o) { o.classList.toggle('dim', o !== g); });
+        showTip(F, e, d[0], CATS.map(function (c, j) { return { color: c[1], v: d[j + 1] + ' / 40', label: c[0] }; }));
+      });
+      hit.addEventListener('mouseleave', function () { groups.forEach(function (o) { o.classList.remove('dim'); }); hideTip(F); });
+    });
+    el('text', { x: (L + W - R) / 2, y: H, 'text-anchor': 'middle', class: 'ax-t', text: '' }, svg);
+    F.table(['Candidate', 'Full credit', 'Other answer', 'No answer'], D.map(function (d) { return [d[0], d[1], d[2], d[3]]; }));
+    F.stats.innerHTML = '<span>items out of <b>40</b></span><span>Flash no answer <b>32</b></span><span>Kimi K3 full credit <b>38</b></span>';
+  })();
+
+  /* ---------------- Figure: reversal slope chart ---------------- */
+  (function () {
+    var F = frame('f-reversal'); if (!F) return;
+    F.ctrls.style.display = 'none';
+    F.legendSet([{ kind: 'dt', color: 'var(--c2)', label: 'DeepSeek V4 Flash' }, { kind: 'dt', color: 'var(--c1)', label: 'GPT-5.5' }]);
+    var D = [['DeepSeek V4 Flash', 95.4, 17.97, 'var(--c2)'], ['GPT-5.5', 77.7, 88.93, 'var(--c1)']];
+    var W = 680, H = 300, T = 30, B = 26, xa = 200, xb = 480;
+    var y = scale(0, 100, H - B, T);
+    var svg = svgBox(F, W, H, 'Reference versus Astra coding score');
+    [0, 25, 50, 75, 100].forEach(function (t) { el('line', { x1: xa - 40, x2: xb + 40, y1: y(t), y2: y(t), class: 'grid' }, svg); el('text', { x: xa - 48, y: y(t) + 4, 'text-anchor': 'end', class: 'tick', text: t + '%' }, svg); });
+    el('line', { x1: xa, x2: xa, y1: T - 6, y2: H - B, class: 'axis' }, svg);
+    el('line', { x1: xb, x2: xb, y1: T - 6, y2: H - B, class: 'axis' }, svg);
+    el('text', { x: xa, y: 14, 'text-anchor': 'middle', class: 'lab-b', text: 'SWE-bench Multilingual' }, svg);
+    el('text', { x: xb, y: 14, 'text-anchor': 'middle', class: 'lab-b', text: 'Astra coding evaluation' }, svg);
+    var gs = [];
+    D.forEach(function (d, di) {
+      var g = el('g', { class: 'mk' }, svg); gs.push(g);
+      el('line', { x1: xa, y1: y(d[1]), x2: xb, y2: y(d[2]), stroke: d[3], 'stroke-width': 2.5, 'stroke-linecap': 'round', pathLength: 1, class: 'a-draw', style: '--d:' + (di * 350 + 200) + 'ms' }, g);
+      el('circle', { cx: xa, cy: y(d[1]), r: 6, fill: d[3], stroke: 'var(--paper)', 'stroke-width': 2 }, g);
+      el('circle', { cx: xb, cy: y(d[2]), r: 6, fill: d[3], stroke: 'var(--paper)', 'stroke-width': 2, class: 'a-pop', style: '--d:' + (di * 350 + 1150) + 'ms' }, g);
+      el('text', { x: xa - 12, y: y(d[1]) + (d[0] === 'GPT-5.5' ? 10 : 0), 'text-anchor': 'end', class: 'val', text: '' }, g);
+      el('text', { x: xb + 12, y: y(d[2]) + 4, class: 'lab a-fade', style: '--d:' + (di * 350 + 1250) + 'ms', text: d[0] + '  ' + d[2].toFixed(2) + '%' }, g);
+      el('text', { x: xa + 10, y: y(d[1]) + (d[0] === 'GPT-5.5' ? 16 : -8), class: 'val', text: d[1].toFixed(1) + '%' }, g);
+      var hit = el('line', { x1: xa, y1: y(d[1]), x2: xb, y2: y(d[2]), stroke: 'transparent', 'stroke-width': 18 }, g);
+      hit.addEventListener('mousemove', function (e) { gs.forEach(function (o) { o.classList.toggle('dim', o !== g); }); showTip(F, e, d[0], [{ color: d[3], v: d[1].toFixed(1) + '%', label: 'reference' }, { color: d[3], v: d[2].toFixed(2) + '%', label: 'Astra coding' }]); });
+      hit.addEventListener('mouseleave', function () { gs.forEach(function (o) { o.classList.remove('dim'); }); hideTip(F); });
+    });
+    F.table(['Candidate', 'SWE-bench Multilingual (%)', 'Astra coding (%)'], D.map(function (d) { return [d[0], d[1].toFixed(1), d[2].toFixed(2)]; }));
+  })();
+
+  /* ---------------- Figure: pilot timeline (HTML) ---------------- */
+  (function () {
+    var F = frame('f-pilots'); if (!F) return;
+    F.ctrls.style.display = 'none';
+    F.legendSet([{ color: 'var(--c2)', label: 'No final answer' }, { color: 'var(--c3)', label: 'Changed or untested protocol' }, { color: 'var(--cn-soft)', border: 'var(--cn)', label: 'Remaining items' }]);
+    var STEPS = [
+      { k: 'Step 1 · Diagnose', h: 'Single-question pilot', rows: [['GLM-5.2', 30, 32]], note: 'GLM exhausts the output allowance on all 32 questions. Astra identifies token exhaustion.' },
+      { k: 'Step 2 · Change protocol', h: 'Four questions per request', rows: [['GPT-5.5', 0, 24], ['DeepSeek V4 Flash', 8, 24], ['GLM-5.2', 8, 24]], note: 'Larger shared output allowance; each question still graded on its own.' },
+      { k: 'Step 3 · Recurrence', h: 'Next grouped pilot', rows: [['DeepSeek V4 Flash', 17, 28]], note: 'Failures cluster by request. Astra tries mixing task types within groups.' },
+      { k: 'Step 4 · Coverage audit', h: 'Tested under the final protocol', rows: [['Questions', 34, 112, 'not tested as frozen']], note: '78 tested with the final prompt and allowance; 34 changed or untested.' },
+      { k: 'Final assessment', h: 'Frozen coding suite', rows: [['DeepSeek V4 Flash', 32, 40]], note: '36 of Flash’s 40 coding items sat in requests that hit the token cap.', final: true }
+    ];
+    F.body.innerHTML = '';
+    var tl = el('div', { class: 'tl' }, F.body);
+    var tableRows = [];
+    STEPS.forEach(function (s) {
+      var c = el('div', { class: s.final ? 'final' : '' }, tl);
+      el('div', { class: 'k', text: s.k }, c);
+      el('h5', { text: s.h }, c);
+      s.rows.forEach(function (r) {
+        var row = el('div', { class: 'row' }, c);
+        var nm = el('div', { class: 'nm' }, row);
+        el('span', { text: r[0] }, nm);
+        el('b', { text: r[1] + '/' + r[2] }, nm);
+        var bar = el('div', { class: 'bar', title: r[1] + ' of ' + r[2] + ' ' + (r[3] || 'without a final answer') }, row);
+        var i = el('i', {}, bar); if (r[3]) i.style.background = 'var(--c3)'; i.style.width = (100 * r[1] / r[2]) + '%'; i.style.transitionDelay = (tableRows.length * 160) + 'ms';
+        if (r[1] === 0) i.style.display = 'none';
+        tableRows.push([s.k + ' · ' + r[0], r[3] || 'No final answer', r[1], r[2], (100 * r[1] / r[2]).toFixed(0) + '%']);
+      });
+      el('div', { class: 'note', text: s.note }, c);
+    });
+    F.table(['Step · candidate', 'Measure', 'Count', 'Of', 'Share'], tableRows);
+  })();
+
+  /* ---------------- dumbbell helper: frozen → alternative, Score | PA panels ---------------- */
+  function dumbbellPanels(F, rows, labels, colors, panels) {
+    // rows: [name, scoreA, paA, scoreB, paB]
+    F.body.innerHTML = '';
+    var wrap = el('div', { class: 'two' }, F.body);
+    panels.forEach(function (P, pi) {
+      var cell = el('div', {}, wrap);
+      el('h6', { text: P.title }, cell);
+      var W = 330, L = 78, R = 18, T = 6, rowH = 38, H = T + rows.length * rowH + 30;
+      var x = scale(P.lo, P.hi, L, W - R);
+      var svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': P.title }, cell);
+      niceTicks(P.lo, P.hi, 4).forEach(function (t) { el('line', { x1: x(t), x2: x(t), y1: T, y2: H - 26, class: 'grid' }, svg); el('text', { x: x(t), y: H - 10, 'text-anchor': 'middle', class: 'tick', text: t + (P.unit || '') }, svg); });
+      if (P.lo < 0) el('line', { x1: x(0), x2: x(0), y1: T, y2: H - 26, class: 'zero' }, svg);
+      rows.forEach(function (r, i) {
+        var y = T + i * rowH + rowH / 2, a = r[1 + pi], b = r[3 + pi];
+        var g = el('g', { class: 'mk' }, svg);
+        el('text', { x: L - 10, y: y + 4.5, 'text-anchor': 'end', class: r[0] === 'Overall' ? 'lab-b' : 'lab', text: r[0] }, g);
+        el('line', { x1: x(a), x2: x(b), y1: y, y2: y, stroke: 'var(--rule)', 'stroke-width': 3, 'stroke-linecap': 'round', class: 'a-fade', style: '--d:' + (i * 90 + 200) + 'ms' }, g);
+        el('circle', { cx: x(a), cy: y, r: 7, fill: 'var(--paper)', stroke: colors[0], 'stroke-width': 2.5, class: 'a-pop', style: '--d:' + i * 90 + 'ms' }, g);
+        el('circle', { cx: x(b), cy: y, r: 4.5, fill: colors[1], class: 'a-pop', style: '--d:' + (i * 90 + 380) + 'ms' }, g);
+        var dlt = b - a;
+        el('text', { x: x(Math.max(a, b)) + 11, y: y + 4, class: 'val a-fade', style: '--d:' + (i * 90 + 520) + 'ms', text: (dlt >= 0 ? '+' : '−') + Math.abs(dlt).toFixed(2) }, g);
+        var hit = el('rect', { x: 0, y: y - rowH / 2, width: W, height: rowH, class: 'hit' }, g);
+        hit.addEventListener('mousemove', function (e) { showTip(F, e, r[0] + ' · ' + P.title, [{ color: colors[0], v: a.toFixed(2) + (P.unit || ''), label: labels[0] }, { color: colors[1], v: b.toFixed(2) + (P.unit || ''), label: labels[1] }]); });
+        hit.addEventListener('mouseleave', function () { hideTip(F); });
+      });
+    });
+    F.replay();
+  }
+
+  /* ---------------- Figure: Astra truncation sensitivity ---------------- */
+  (function () {
+    var F = frame('f-trunc'); if (!F) return;
+    F.ctrls.style.display = 'none';
+    var labels = ['Frozen protocol', 'Capped items excluded'], colors = ['var(--c1)', 'var(--c2)'];
+    F.legendSet([{ kind: 'ho', border: colors[0], label: labels[0] }, { kind: 'dt', color: colors[1], label: labels[1] }]);
+    var rows = ARTICLE_DATA.astra_truncation;
+    dumbbellPanels(F, rows, labels, colors, [{ title: 'Score (100 × CCC)', lo: -10, hi: 50 }, { title: 'Pairwise agreement', lo: 50, hi: 90, unit: '%' }]);
+    F.table(['Domain', 'Score frozen', 'Score excl.', 'PA frozen (%)', 'PA excl. (%)'], rows.map(function (r) { return [r[0], f2(r[1]), f2(r[3]), f2(r[2]), f2(r[4])]; }));
+  })();
+
+  /* ---------------- Figure: Grok weight concentration ---------------- */
+  (function () {
+    var F = frame('f-weights'); if (!F) return;
+    function rep(v, n) { var a = []; for (var i = 0; i < n; i++) a.push(v); return a; }
+    var W8 = ARTICLE_DATA.grok_weights;
+    var st = { dom: 'co-work', mode: 'grok' };
+    F.seg('Domain', [['co-work', 'Co-work'], ['coding', 'Coding'], ['reasoning', 'Reasoning']], st.dom, function (v) { st.dom = v; draw(); });
+    F.seg('Weights', [['grok', 'Grok frozen'], ['uniform', 'Uniform']], st.mode, function (v) { st.mode = v; draw(); });
+    function draw() {
+      var raw = W8[st.dom], sum = raw.reduce(function (a, b) { return a + b; }, 0);
+      var w = raw.map(function (v) { return v / sum; }).sort(function (a, b) { return b - a; });
+      var n = w.length;
+      if (st.mode === 'uniform') w = w.map(function () { return 1 / n; });
+      var top6 = w.slice(0, 6).reduce(function (a, b) { return a + b; }, 0);
+      var neff = 1 / w.reduce(function (a, b) { return a + b * b; }, 0);
+      F.legendSet([{ color: 'var(--c2)', label: 'Six largest weights' }, { color: 'var(--cn)', label: 'Other questions' }]);
+      var W = 680, L = 46, R = 10, T = 10, B = 34, H = 250;
+      var maxW = Math.max(0.2, Math.ceil(Math.max.apply(null, w) * 20) / 20);
+      var y = scale(0, maxW, H - B, T);
+      var svg = svgBox(F, W, H, 'Question weights, sorted');
+      niceTicks(0, maxW, 4).forEach(function (t) { el('line', { x1: L, x2: W - R, y1: y(t), y2: y(t), class: 'grid' }, svg); el('text', { x: L - 8, y: y(t) + 4, 'text-anchor': 'end', class: 'tick', text: Math.round(t * 100) + '%' }, svg); });
+      var bw = (W - R - L) / n, gap = n > 30 ? 1 : 2;
+      w.forEach(function (v, i) {
+        var x0 = L + i * bw + gap / 2, hgt = Math.max(1, (H - B) - y(v));
+        var r = el('rect', { x: x0, y: (H - B) - hgt, width: Math.max(1, bw - gap), height: hgt, rx: Math.min(2, bw / 4), fill: i < 6 ? 'var(--c2)' : 'var(--cn)', class: 'mk a-col', style: '--d:' + i * (n > 30 ? 10 : 30) + 'ms' }, svg);
+        var hit = el('rect', { x: L + i * bw, y: T, width: bw, height: H - B - T, class: 'hit' }, svg);
+        hit.addEventListener('mousemove', function (e) { r.setAttribute('opacity', 0.75); showTip(F, e, 'Question rank ' + (i + 1) + ' of ' + n, [{ color: i < 6 ? 'var(--c2)' : 'var(--cn)', v: (v * 100).toFixed(2) + '%', label: 'of domain weight' }]); });
+        hit.addEventListener('mouseleave', function () { r.removeAttribute('opacity'); hideTip(F); });
+      });
+      el('line', { x1: L, x2: W - R, y1: H - B, y2: H - B, class: 'axis' }, svg);
+      el('text', { x: (L + W - R) / 2, y: H - 8, 'text-anchor': 'middle', class: 'ax-t', text: n + ' questions, sorted by weight' }, svg);
+      if (st.mode === 'grok') {
+        var xm = L + 6 * bw;
+        el('line', { x1: xm, x2: xm, y1: T, y2: H - B, stroke: 'var(--ink-3)', 'stroke-dasharray': '3 3' }, svg);
+        el('text', { x: xm + 6, y: T + 12, class: 'lab-b', text: 'Top six: ' + (top6 * 100).toFixed(1) + '% of the weight' }, svg);
+      }
+      F.stats.innerHTML = '<span>questions <b>' + n + '</b></span><span>top-six share <b>' + (top6 * 100).toFixed(1) + '%</b></span><span>weight-equivalent count <b>' + neff.toFixed(2) + '</b></span>';
+      F.table(['Rank', 'Weight (%)'], w.map(function (v, i) { return [String(i + 1), (v * 100).toFixed(3)]; }));
+      F.replay();
+    }
+    draw();
+  })();
+
+  /* ---------------- Figure: Grok reweighting counterfactual ---------------- */
+  (function () {
+    var F = frame('f-reweight'); if (!F) return;
+    var labels = ['Grok’s weights', 'Uniform weights'], colors = ['var(--c1)', 'var(--c2)'];
+    F.legendSet([{ kind: 'ho', border: colors[0], label: labels[0] }, { kind: 'dt', color: colors[1], label: labels[1] }]);
+    var P = ARTICLE_DATA.grok_reweight;
+    function draw(k) {
+      var rows = P[k];
+      dumbbellPanels(F, rows, labels, colors, [{ title: 'Score (100 × CCC)', lo: 0, hi: 60 }, { title: 'Pairwise agreement', lo: 60, hi: 90, unit: '%' }]);
+      F.table(['Domain', 'Score frozen', 'Score uniform', 'PA frozen (%)', 'PA uniform (%)'], rows.map(function (r) { return [r[0], f2(r[1]), f2(r[3]), f2(r[2]), f2(r[4])]; }));
+      var o = rows[3];
+      F.stats.innerHTML = '<span>overall Score <b>' + f2(o[1]) + ' → ' + f2(o[3]) + '</b></span><span>overall PA <b>' + f2(o[2]) + '% → ' + f2(o[4]) + '%</b></span><span>' + (k === 'm12' ? '12 matched candidates' : '10 candidates with all 107 grades') + ' · 14 targets</span>';
+    }
+    F.seg('Panel', [['m12', 'Matched twelve'], ['c10', 'Complete ten']], 'm12', draw);
+    draw('m12');
+  })();
+
+  /* ---------------- Figure: native-component effects ---------------- */
+  (function () {
+    var F = frame('f-components'); if (!F) return;
+    // researcher, group, domain, n, scoreEff, scoreLo, scoreHi, scoreMean, paEff, paLo, paHi, paMean
+    var C = ARTICLE_DATA.components;
+    var NAMES = { codebase_tracing: 'Repository tracing', gdp_data: 'Spreadsheets', hle_choice: 'HLE choices', hle_exact: 'HLE exact', arxiv_math: 'ArXiv math' };
+    function nice(g) { return NAMES[g] || g.replace(/_/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); }); }
+    var FOCUS = { 'Astra|codebase_tracing': 1, 'Astra|gdp_data': 1, 'K3|hard_implementation': 0 };
+    var RES = { Astra: 'GPT-6 Astra', 'GLM5.3': 'GLM-5.3', K3: 'Kimi K3' };
+    var st = { r: 'Astra', m: 'score' };
+    F.seg('Researcher', [['Astra', 'GPT-6 Astra'], ['GLM5.3', 'GLM-5.3'], ['K3', 'Kimi K3']], st.r, function (v) { st.r = v; draw(); });
+    F.seg('Metric', [['score', 'Score'], ['pa', 'PA']], st.m, function (v) { st.m = v; draw(); });
+    F.legendSet([{ kind: 'dt', color: 'var(--c2)', label: 'Discussed in the text' }, { kind: 'dt', color: 'var(--c1)', label: 'Other task groups' }, { kind: 'rg', label: 'Random removals, central 95%' }]);
+    function draw() {
+      var rows = C.filter(function (c) { return c[0] === st.r; });
+      var o = st.m === 'score' ? 4 : 8, unit = st.m === 'score' ? ' pts' : ' pp';
+      var vals = []; rows.forEach(function (c) { vals.push(c[o], c[o + 1], c[o + 2]); });
+      var lo = Math.floor(Math.min.apply(null, vals) / 5) * 5, hi = Math.ceil(Math.max.apply(null, vals) / 5) * 5;
+      var W = 680, L = 196, R = 20, T = 6, rowH = 28, gapH = 14;
+      var doms = ['coding', 'co-work', 'reasoning'];
+      var H = T + rows.length * rowH + doms.length * gapH + 50;
+      var x = scale(lo, hi, L, W - R);
+      var svg = svgBox(F, W, H, 'Task group effects');
+      niceTicks(lo, hi, 7).forEach(function (t) { el('line', { x1: x(t), x2: x(t), y1: T, y2: H - 44, class: 'grid' }, svg); el('text', { x: x(t), y: H - 28, 'text-anchor': 'middle', class: 'tick', text: t }, svg); });
+      el('line', { x1: x(0), x2: x(0), y1: T, y2: H - 44, class: 'zero' }, svg);
+      el('text', { x: x(0) + 6, y: H - 8, class: 'ax-t', text: 'group helps →' }, svg);
+      el('text', { x: x(0) - 6, y: H - 8, 'text-anchor': 'end', class: 'ax-t', text: '← group hurts' }, svg);
+      var yc = T, tbl = [], gs = [];
+      doms.forEach(function (dm) {
+        var sub = rows.filter(function (c) { return c[2] === dm; }); if (!sub.length) return;
+        el('text', { x: 0, y: yc + 10, class: 'tick', 'font-size': 10.5, text: dm.toUpperCase() }, svg);
+        yc += gapH;
+        sub.forEach(function (c) {
+          var y = yc + rowH / 2, foc = FOCUS[c[0] + '|' + c[1]], col = foc ? 'var(--c2)' : 'var(--c1)';
+          var g = el('g', { class: 'mk' }, svg); gs.push(g);
+          el('text', { x: L - 12, y: y + 4.5, 'text-anchor': 'end', class: foc ? 'lab-b' : 'lab', text: nice(c[1]) + ' (' + c[3] + ')' }, g);
+          el('rect', { x: x(c[o + 1]), y: y - 4, width: Math.max(2, x(c[o + 2]) - x(c[o + 1])), height: 8, rx: 4, fill: 'var(--cn-soft)', stroke: 'var(--cn)', 'stroke-width': 0.75, class: 'a-fade', style: '--d:' + tbl.length * 40 + 'ms' }, g);
+          el('line', { x1: x(c[o + 3]), x2: x(c[o + 3]), y1: y - 6, y2: y + 6, stroke: 'var(--ink-4)', 'stroke-width': 1.25 }, g);
+          el('circle', { cx: x(c[o]), cy: y, r: foc ? 6.5 : 5.5, fill: col, stroke: 'var(--paper)', 'stroke-width': 2, class: 'a-pop', style: '--d:' + (tbl.length * 40 + 300) + 'ms' }, g);
+          var hit = el('rect', { x: 0, y: y - rowH / 2, width: W, height: rowH, class: 'hit' }, g);
+          hit.addEventListener('mousemove', function (e) {
+            gs.forEach(function (q) { q.classList.toggle('dim', q !== g); });
+            showTip(F, e, RES[c[0]] + ' · ' + nice(c[1]), [{ color: col, v: f2(c[o]) + unit, label: 'effect of this group' }, { color: 'var(--cn)', v: f2(c[o + 1]) + ' to ' + f2(c[o + 2]), label: 'random 95%' }, { v: c[3] + ' q', label: dm }]);
+          });
+          hit.addEventListener('mouseleave', function () { gs.forEach(function (q) { q.classList.remove('dim'); }); hideTip(F); });
+          tbl.push([nice(c[1]), dm, c[3], f2(c[o]), f2(c[o + 1]) + ' … ' + f2(c[o + 2])]);
+          yc += rowH;
+        });
+      });
+      F.table(['Task group', 'Domain', 'Questions', 'Effect' + unit, 'Random 95%'], tbl);
+      F.stats.innerHTML = '<span>' + RES[st.r] + '</span><span>' + (st.m === 'score' ? 'Score points' : 'PA percentage points') + ', within the group’s domain</span>';
+      F.replay();
+    }
+    draw();
+  })();
+
+  /* ---------------- footnote popovers ---------------- */
+  document.querySelectorAll('sup.fn').forEach(function (s) {
+    var n = s.textContent.trim(), src = document.querySelector('[data-fn="' + n + '"]');
+    if (!src) return;
+    s.setAttribute('tabindex', '0'); s.setAttribute('role', 'link'); s.setAttribute('aria-label', 'Footnote ' + n);
+    s.addEventListener('keydown', function (e) { if (e.key === 'Enter') location.hash = 'fn-' + n; });
+    var pop = null;
+    function open() {
+      close();
+      pop = el('div', { class: 'fnpop', 'data-n': n }, document.body);
+      pop.innerHTML = src.innerHTML;
+      var r = s.getBoundingClientRect();
+      var left = Math.min(window.scrollX + r.left - 20, window.scrollX + document.documentElement.clientWidth - 360);
+      pop.style.left = Math.max(8, left) + 'px';
+      pop.style.top = (window.scrollY + r.bottom + 8) + 'px';
+    }
+    function close() { if (pop) { pop.remove(); pop = null; } }
+    s.addEventListener('mouseenter', open); s.addEventListener('focus', open);
+    s.addEventListener('mouseleave', close); s.addEventListener('blur', close);
+    s.addEventListener('click', function () { location.hash = 'fn-' + n; });
+  });
+
+  /* ---------------- contents scrollspy ---------------- */
+  var links = Array.prototype.slice.call(document.querySelectorAll('.ar-toc a'));
+  var targets = links.map(function (a) { return document.querySelector(a.getAttribute('href')); });
+  function spy() {
+    var y = window.scrollY + 140, cur = -1;
+    targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top + window.scrollY <= y) cur = i; });
+    links.forEach(function (a, i) { a.classList.toggle('active', i === cur); });
+  }
+  window.addEventListener('scroll', spy, { passive: true }); spy();
+})();
+</script>
+</body>
+</html>

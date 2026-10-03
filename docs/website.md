@@ -17,3 +17,7 @@ Edit files under `website/` and push to `main`; the workflow publishes that dire
 Run `python -m http.server 8000 --directory website` and open http://localhost:8000/ to preview.
 
 Once arXiv is public, set `paperUrl` in `website/data.json` to show the Paper link.
+
+## Research blog
+
+[When AI Agents Design the Test](https://mercury7353.github.io/self-evaluation-bench/blog/when-ai-agents-design-the-test.html) lives in `website/blog/when-ai-agents-design-the-test.html`. Its downloadable `.data.json` contains the aggregate chart values and source hashes, without raw responses or private paths. Keep its embedded `article-data` JSON identical to that download when updating figures. The article links the relevant public research traces.

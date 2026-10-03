@@ -1,6 +1,6 @@
 # Self-Evaluation Bench
 
-[Project website](https://mercury7353.github.io/self-evaluation-bench/) · [Website deployment](docs/website.md)
+[Project website](https://mercury7353.github.io/self-evaluation-bench/) · [When AI Agents Design the Test — blog](https://mercury7353.github.io/self-evaluation-bench/blog/when-ai-agents-design-the-test.html) · [Website deployment](docs/website.md)
 
 Evaluate an **agent researcher's ability to build an inexpensive benchmark**. A YAML experiment selects the researcher, candidate models and model families, visible/hidden target benchmarks, resource access, budgets, and execution policy.
 
