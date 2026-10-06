@@ -1,0 +1,43 @@
+cff-version: 1.2.0
+message: "If you use EvalResearchBench, please cite the paper below."
+title: "EvalResearchBench"
+type: software
+repository-code: "https://github.com/Mercury7353/self-evaluation-bench"
+url: "https://mercury7353.github.io/self-evaluation-bench/"
+authors:
+  - family-names: "Zhang"
+    given-names: "Yaolun"
+  - family-names: "Xu"
+    given-names: "Tianyi"
+  - family-names: "Zhao"
+    given-names: "Yujie"
+  - family-names: "Zhao"
+    given-names: "Jishen"
+  - family-names: "Wu"
+    given-names: "Qingyun"
+  - family-names: "Wang"
+    given-names: "Huazheng"
+preferred-citation:
+  type: article
+  title: "EvalResearchBench: Can AI Agents Design Their Own Evaluations?"
+  authors:
+    - family-names: "Zhang"
+      given-names: "Yaolun"
+    - family-names: "Xu"
+      given-names: "Tianyi"
+    - family-names: "Zhao"
+      given-names: "Yujie"
+    - family-names: "Zhao"
+      given-names: "Jishen"
+    - family-names: "Wu"
+      given-names: "Qingyun"
+    - family-names: "Wang"
+      given-names: "Huazheng"
+  year: 2026
+  journal: "arXiv"
+  doi: "10.48550/arXiv.2610.04184"
+  url: "https://arxiv.org/abs/2610.04184"
+  identifiers:
+    - type: other
+      value: "arXiv:2610.04184"
+      description: "arXiv preprint identifier"

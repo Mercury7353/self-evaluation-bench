@@ -1,6 +1,6 @@
 # Self-Evaluation Bench
 
-[Project website](https://mercury7353.github.io/self-evaluation-bench/) · [When AI Agents Design the Test — blog](https://mercury7353.github.io/self-evaluation-bench/blog/when-ai-agents-design-the-test.html) · [Website deployment](docs/website.md)
+[Paper (arXiv)](https://arxiv.org/abs/2610.04184) · [PDF](https://arxiv.org/pdf/2610.04184) · [Citation](#citation) · [Project website](https://mercury7353.github.io/self-evaluation-bench/) · [When AI Agents Design the Test — blog](https://mercury7353.github.io/self-evaluation-bench/blog/when-ai-agents-design-the-test.html) · [Website deployment](docs/website.md)
 
 Evaluate an **agent researcher's ability to build an inexpensive benchmark**. A YAML experiment selects the researcher, candidate models and model families, visible/hidden target benchmarks, resource access, budgets, and execution policy.
 
@@ -416,3 +416,22 @@ SEB_TEST_ROOT="$SEB_ROOTFS" SEB_TEST_SCIENCE="$SEB_SCIENCE_PACKAGES" pytest -q
 ```
 
 Runtime tests use only synthetic fixtures and local fake providers. A collaborator must separately validate their provider's streaming/tool-use compatibility and verified prices before scaling paid experiments.
+
+## Citation
+
+If you use EvalResearchBench, please cite our paper:
+
+```bibtex
+@misc{zhang2026evalresearchbench,
+  title         = {EvalResearchBench: Can AI Agents Design Their Own Evaluations?},
+  author        = {Yaolun Zhang and Tianyi Xu and Yujie Zhao and Jishen Zhao and Qingyun Wu and Huazheng Wang},
+  year          = {2026},
+  eprint        = {2610.04184},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.AI},
+  doi           = {10.48550/arXiv.2610.04184},
+  url           = {https://arxiv.org/abs/2610.04184}
+}
+```
+
+[Download BibTeX](website/citation.bib).

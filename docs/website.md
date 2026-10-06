@@ -16,7 +16,7 @@ Edit files under `website/` and push to `main`; the workflow publishes that dire
 
 Run `python -m http.server 8000 --directory website` and open http://localhost:8000/ to preview.
 
-Once arXiv is public, set `paperUrl` in `website/data.json` to show the Paper link.
+The published paper is [arXiv:2610.04184](https://arxiv.org/abs/2610.04184). `paperUrl` in `website/data.json` points to its PDF. Keep the paper metadata consistent in `CITATION.cff`, the README, `website/citation.bib`, the homepage and the blog citation.
 
 ## Research blog
 

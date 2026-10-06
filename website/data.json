@@ -1,6 +1,6 @@
 {
   "paperTitle": "EvalResearchBench: Can AI Agents Design Their Own Evaluations?",
-  "paperUrl": null,
+  "paperUrl": "https://arxiv.org/pdf/2610.04184",
   "sourceRevision": "d0507960aadae9dfaee115fa2f9bc99c9327afa2",
   "domains": [
     "coding",
